@@ -20,6 +20,8 @@ export function AdminDashboard() {
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'games' | 'live' | 'settings' | 'domains'>('requests');
+  const [authorizedDomains, setAuthorizedDomains] = useState<string[]>(['ansh-risknreward.vercel.app']);
+  const [newDomainInput, setNewDomainInput] = useState('');
   const [limits, setLimits] = useState({ 
     minRecharge: 3, 
     minWithdraw: 5,
@@ -88,6 +90,15 @@ export function AdminDashboard() {
       }
     });
 
+    // Fetch authorized domains
+    const unsubDomains = onSnapshot(doc(db, 'settings', 'authorized_domains'), (docSnap) => {
+      if (docSnap.exists() && docSnap.data().domains) {
+        setAuthorizedDomains(docSnap.data().domains);
+      } else {
+        setDoc(doc(db, 'settings', 'authorized_domains'), { domains: ['ansh-risknreward.vercel.app'] }, { merge: true });
+      }
+    });
+
     setLoading(false);
 
     return () => {
@@ -95,8 +106,40 @@ export function AdminDashboard() {
       unsubGames();
       unsubLive();
       unsubSettings();
+      unsubDomains();
     };
   }, [isAuthenticated]);
+
+  const handleAddDomain = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newDomainInput.trim()) return;
+    const cleaned = newDomainInput.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+    if (authorizedDomains.includes(cleaned)) {
+      alert('Domain already exists!');
+      return;
+    }
+    const updated = [...authorizedDomains, cleaned];
+    try {
+      await setDoc(doc(db, 'settings', 'authorized_domains'), { domains: updated }, { merge: true });
+      setAuthorizedDomains(updated);
+      setNewDomainInput('');
+      alert(`Domain "${cleaned}" successfully added to Firebase authorized domains!`);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to add domain.');
+    }
+  };
+
+  const handleRemoveDomain = async (domainToRemove: string) => {
+    const updated = authorizedDomains.filter(d => d !== domainToRemove);
+    try {
+      await setDoc(doc(db, 'settings', 'authorized_domains'), { domains: updated }, { merge: true });
+      setAuthorizedDomains(updated);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to remove domain.');
+    }
+  };
 
   const handleSaveLimits = async (e: FormEvent) => {
     e.preventDefault();
@@ -229,24 +272,53 @@ export function AdminDashboard() {
         <div className="max-w-2xl bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-6">
           <h2 className="text-lg font-medium">Authorized Domains Whitelist</h2>
           <p className="text-sm text-neutral-400">
-            Manage authorized domains for Firebase Auth and hosting integration.
+            Manage authorized domains for Firebase Auth and hosting integration stored securely in Firebase Firestore.
           </p>
+
+          <form onSubmit={handleAddDomain} className="flex gap-3">
+            <input
+              type="text"
+              placeholder="e.g. ansh-risknreward.vercel.app"
+              value={newDomainInput}
+              onChange={(e) => setNewDomainInput(e.target.value)}
+              className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 text-sm"
+            />
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-neutral-100 hover:bg-white text-neutral-950 font-semibold rounded-xl text-sm transition-colors"
+            >
+              Add Domain
+            </button>
+          </form>
+
           <div className="space-y-3">
-            <div className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl flex items-center justify-between">
-              <div>
-                <div className="font-mono text-sm text-neutral-200">ansh-risknreward.vercel.app</div>
-                <div className="text-xs text-emerald-400 mt-1">● Whitelisted & Active in App Config</div>
+            {authorizedDomains.map((domain) => (
+              <div key={domain} className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl flex items-center justify-between">
+                <div>
+                  <div className="font-mono text-sm text-neutral-200">{domain}</div>
+                  <div className="text-xs text-emerald-400 mt-1">● Whitelisted & Stored in Firebase</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(domain);
+                      alert('Domain copied to clipboard!');
+                    }}
+                    className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg text-xs font-medium transition-colors"
+                  >
+                    Copy
+                  </button>
+                  {domain !== 'ansh-risknreward.vercel.app' && (
+                    <button
+                      onClick={() => handleRemoveDomain(domain)}
+                      className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-medium transition-colors"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
-              <button
-                onClick={() => {
-                  navigator.clipboard.writeText('ansh-risknreward.vercel.app');
-                  alert('Domain copied to clipboard!');
-                }}
-                className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg text-xs font-medium transition-colors"
-              >
-                Copy Domain
-              </button>
-            </div>
+            ))}
           </div>
           <div className="text-xs text-neutral-500 leading-relaxed bg-neutral-950 p-4 rounded-xl border border-neutral-800">
             <span className="font-semibold text-neutral-300">Note on Firebase Authentication:</span> Firebase Auth requires authorized domains to be added in your Firebase Console (Authentication &gt; Settings &gt; Authorized domains) if you host your frontend on custom domains like Vercel.
