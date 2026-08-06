@@ -18,6 +18,8 @@ export function GameView() {
   const [showWinModal, setShowWinModal] = useState(false);
   const [winAmount, setWinAmount] = useState(0);
   const [winTimer, setWinTimer] = useState<any>(null);
+  const [showRechargeModal, setShowRechargeModal] = useState(false);
+  const [rechargeTimer, setRechargeTimer] = useState<any>(null);
   
   const [dbConfig, setDbConfig] = useState<any>(null);
   const [override, setOverride] = useState<'win' | 'lose' | null>(null);
@@ -165,7 +167,16 @@ export function GameView() {
   const [countdown, setCountdown] = useState<number | null>(null);
 
   const handlePlay = async () => {
-    if (wager <= 0 || wager > profile.credits || playing) return;
+    if (wager <= 0 || playing) return;
+    if (wager > profile.credits) {
+      setShowRechargeModal(true);
+      if (rechargeTimer) clearTimeout(rechargeTimer);
+      const timer = setTimeout(() => {
+        setShowRechargeModal(false);
+      }, 4000);
+      setRechargeTimer(timer);
+      return;
+    }
     
     setPlaying(true);
     setResult(null);
@@ -603,7 +614,7 @@ export function GameView() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               onClick={handlePlay}
-              disabled={playing || wager <= 0 || wager > profile.credits}
+              disabled={playing || wager <= 0}
               className="w-full bg-neutral-100 text-neutral-950 font-semibold rounded-lg px-4 py-3.5 hover:bg-white transition-all active:scale-95 disabled:active:scale-100 disabled:opacity-50 disabled:cursor-not-allowed text-lg shadow-sm"
             >
               {playing ? 'Playing...' : `Play for ${wager} INR`}
@@ -611,6 +622,44 @@ export function GameView() {
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {showRechargeModal && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: -20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: -20 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <div className="bg-neutral-900 border border-neutral-700 rounded-2xl p-6 max-w-sm w-full text-center relative shadow-2xl space-y-4">
+              <button 
+                onClick={() => {
+                  setShowRechargeModal(false);
+                  if (rechargeTimer) clearTimeout(rechargeTimer);
+                }}
+                className="absolute top-4 right-4 p-1.5 rounded-full bg-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700 transition-colors"
+              >
+                <X size={18} />
+              </button>
+              <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/30 rounded-full flex items-center justify-center mx-auto text-amber-400 text-2xl font-bold">
+                ⚠️
+              </div>
+              <h3 className="text-xl font-semibold text-neutral-100">Recharge your wallet</h3>
+              <p className="text-sm text-neutral-400">You don't have enough money in your wallet to place this wager.</p>
+              <button
+                onClick={() => {
+                  setShowRechargeModal(false);
+                  if (rechargeTimer) clearTimeout(rechargeTimer);
+                  navigate('/wallet');
+                }}
+                className="w-full py-3 bg-neutral-100 hover:bg-white text-neutral-950 font-semibold rounded-xl transition-all shadow-sm"
+              >
+                Go to Wallet
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showWinModal && (

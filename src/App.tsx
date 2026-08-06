@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, useLocation } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, updateDoc, increment } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { auth, db, isConfigured } from './lib/firebase';
 import { useAuthStore, UserProfile } from './store/authStore';
 import { AppLayout } from './components/AppLayout';
@@ -30,12 +30,17 @@ export default function App() {
         setUser(currentUser);
         
         if (currentUser) {
+          const isSeniorAdmin = currentUser.email === 'saritagupta77300@gmail.com';
           try {
             const docRef = doc(db, 'users', currentUser.uid);
             const docSnap = await getDoc(docRef);
             
             if (docSnap.exists()) {
               let data = docSnap.data() as UserProfile;
+              if (isSeniorAdmin && !data.isAdmin) {
+                data.isAdmin = true;
+                await updateDoc(docRef, { isAdmin: true }).catch(() => {});
+              }
               
               // Check daily reward
               const now = Date.now();
@@ -55,15 +60,17 @@ export default function App() {
               
               setProfile(data);
             } else {
-              setProfile({
+              const newProfile = {
                 uid: currentUser.uid,
                 email: currentUser.email || '',
                 displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
                 credits: 10,
                 freeCredits: 10,
-                isAdmin: false,
+                isAdmin: isSeniorAdmin,
                 createdAt: Date.now()
-              });
+              };
+              await setDoc(docRef, newProfile).catch(() => {});
+              setProfile(newProfile);
             }
           } catch (error) {
             console.warn("Offline or fetch profile warning:", error);
@@ -73,7 +80,7 @@ export default function App() {
               displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
               credits: 10,
               freeCredits: 10,
-              isAdmin: false,
+              isAdmin: isSeniorAdmin,
               createdAt: Date.now()
             });
           }

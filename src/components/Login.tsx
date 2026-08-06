@@ -1,7 +1,7 @@
 import { useState, FormEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword, sendPasswordResetEmail, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { useAuthStore } from '../store/authStore';
 import { motion } from 'motion/react';
@@ -51,6 +51,7 @@ export function Login() {
       const userSnap = await getDoc(userRef);
 
       if (!userSnap.exists()) {
+        const isSeniorAdmin = user.email === 'saritagupta77300@gmail.com';
         // Create user profile if it doesn't exist
         await setDoc(userRef, {
           uid: user.uid,
@@ -58,9 +59,11 @@ export function Login() {
           displayName: user.displayName || user.email?.split('@')[0],
           credits: 10,
           freeCredits: 10,
-          isAdmin: false,
+          isAdmin: isSeniorAdmin,
           createdAt: Date.now(),
         });
+      } else if (user.email === 'saritagupta77300@gmail.com' && !userSnap.data().isAdmin) {
+        await updateDoc(userRef, { isAdmin: true });
       }
       
       navigate('/');
