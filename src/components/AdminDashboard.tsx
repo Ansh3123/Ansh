@@ -20,7 +20,16 @@ export function AdminDashboard() {
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'games' | 'live' | 'settings' | 'domains'>('requests');
-  const [authorizedDomains, setAuthorizedDomains] = useState<string[]>(['ansh-risknreward.vercel.app']);
+  const [authorizedDomains, setAuthorizedDomains] = useState<string[]>([
+    'ansh-risknreward.vercel.app',
+    'ais-dev-uhulvo4bxmmldlfknoraaj-266190708646.asia-southeast1.run.app',
+    'ais-pre-uhulvo4bxmmldlfknoraaj-266190708646.asia-southeast1.run.app',
+    'ai.studio',
+    'run.app',
+    'asia-southeast1.run.app',
+    'localhost',
+    '127.0.0.1'
+  ]);
   const [newDomainInput, setNewDomainInput] = useState('');
   const [limits, setLimits] = useState({ 
     minRecharge: 3, 
@@ -95,7 +104,18 @@ export function AdminDashboard() {
       if (docSnap.exists() && docSnap.data().domains) {
         setAuthorizedDomains(docSnap.data().domains);
       } else {
-        setDoc(doc(db, 'settings', 'authorized_domains'), { domains: ['ansh-risknreward.vercel.app'] }, { merge: true });
+        setDoc(doc(db, 'settings', 'authorized_domains'), { 
+          domains: [
+            'ansh-risknreward.vercel.app',
+            'ais-dev-uhulvo4bxmmldlfknoraaj-266190708646.asia-southeast1.run.app',
+            'ais-pre-uhulvo4bxmmldlfknoraaj-266190708646.asia-southeast1.run.app',
+            'ai.studio',
+            'run.app',
+            'asia-southeast1.run.app',
+            'localhost',
+            '127.0.0.1'
+          ] 
+        }, { merge: true });
       }
     });
 
