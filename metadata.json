@@ -1,0 +1,6 @@
+{
+  "name": "Risk and reward",
+  "description": "Entertainment and educational games platform with virtual demo credits.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
