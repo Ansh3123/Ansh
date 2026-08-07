@@ -21,10 +21,16 @@ export const googleProvider = new GoogleAuthProvider();
 
 const dbId = (config as any).firestoreDatabaseId || import.meta.env.VITE_FIREBASE_DATABASE_ID;
 
-export const db = (dbId && dbId !== '(default)')
-  ? getFirestore(app, dbId)
-  : getFirestore(app);
+let firestoreDb: any = null;
+try {
+  firestoreDb = (dbId && dbId !== '(default)')
+    ? getFirestore(app, dbId)
+    : getFirestore(app);
+} catch (e) {
+  console.warn("Firestore API not enabled or uninitialized in GCP console:", e);
+}
 
+export const db = firestoreDb;
 export const storage = getStorage(app);
 export const isConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
 
