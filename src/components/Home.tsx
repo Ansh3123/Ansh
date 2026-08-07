@@ -1,51 +1,31 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { getGames } from '../lib/storage';
 import { motion } from 'motion/react';
 import { Dices, Target, CircleDollarSign, LoaderPinwheel, Gamepad2 } from 'lucide-react';
 
-const DEFAULT_GAMES = [
-  { id: 'dice-roll', name: 'Dice Roll', icon: Dices, description: 'Roll the dice and win.' },
-  { id: 'dart-board', name: 'Dart Board', icon: Target, description: 'Hit the bullseye.' },
-  { id: 'coin-flip', name: 'Coin Flip', icon: CircleDollarSign, description: 'Heads or Tails?' },
-  { id: 'lucky-wheel', name: 'Lucky Wheel', icon: LoaderPinwheel, description: 'Spin to win big.' }
-];
-
 export function Home() {
   const { user } = useAuthStore();
-  const [games, setGames] = useState<any[]>(DEFAULT_GAMES);
+  const [games, setGames] = useState<any[]>([]);
 
   useEffect(() => {
-    async function fetchGames() {
-      try {
-        const snap = await getDocs(collection(db, 'games'));
-        if (!snap.empty) {
-          const fetchedGames = snap.docs.map(doc => {
-            const data = doc.data();
-            // Assign icon based on id mapping or fallback to Gamepad2
-            let icon = Gamepad2;
-            if (doc.id === 'dice-roll') icon = Dices;
-            else if (doc.id === 'dart-board') icon = Target;
-            else if (doc.id === 'coin-flip') icon = CircleDollarSign;
-            else if (doc.id === 'lucky-wheel') icon = LoaderPinwheel;
+    const list = getGames();
+    const mapped = list.map(g => {
+      let icon = Gamepad2;
+      if (g.id === 'dice-roll') icon = Dices;
+      else if (g.id === 'dart-board') icon = Target;
+      else if (g.id === 'coin-flip') icon = CircleDollarSign;
+      else if (g.id === 'lucky-wheel') icon = LoaderPinwheel;
 
-            return {
-              id: doc.id,
-              name: data.name,
-              description: data.description,
-              icon
-            };
-          });
-          setGames(fetchedGames);
-        }
-      } catch (err) {
-        // Fallback default games if offline or uninitialized
-      }
-    }
-    fetchGames();
+      return {
+        ...g,
+        icon
+      };
+    });
+    setGames(mapped);
   }, []);
+
 
   return (
     <div className="py-8">

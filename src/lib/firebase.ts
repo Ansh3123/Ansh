@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import config from '../../firebase-applet-config.json';
@@ -17,8 +17,9 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
+export const googleProvider = new GoogleAuthProvider();
 
-const dbId = config.firestoreDatabaseId || import.meta.env.VITE_FIREBASE_DATABASE_ID;
+const dbId = (config as any).firestoreDatabaseId || import.meta.env.VITE_FIREBASE_DATABASE_ID;
 
 export const db = (dbId && dbId !== '(default)')
   ? getFirestore(app, dbId)
@@ -26,4 +27,5 @@ export const db = (dbId && dbId !== '(default)')
 
 export const storage = getStorage(app);
 export const isConfigured = Boolean(firebaseConfig.apiKey && firebaseConfig.projectId);
+
 
