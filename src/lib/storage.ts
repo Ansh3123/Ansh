@@ -112,6 +112,9 @@ function getItem<T>(key: string, defaultValue: T): T {
 function setItem<T>(key: string, value: T): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('app_storage_change'));
+    }
   } catch (err) {
     console.error('Storage write error:', err);
   }
@@ -127,13 +130,15 @@ export function saveUsers(users: UserAccount[]): void {
 }
 
 export function getUserById(uid: string): UserAccount | null {
+  if (!uid) return null;
   const users = getUsers();
-  return users.find(u => u.uid === uid) || null;
+  return users.find(u => u.uid === uid || u.email?.toLowerCase() === uid.toLowerCase()) || null;
 }
 
 export function updateUser(uid: string, patch: Partial<UserAccount>): UserAccount | null {
+  if (!uid) return null;
   const users = getUsers();
-  const idx = users.findIndex(u => u.uid === uid);
+  let idx = users.findIndex(u => u.uid === uid || u.email?.toLowerCase() === uid.toLowerCase());
   if (idx === -1) return null;
   
   users[idx] = { ...users[idx], ...patch };
@@ -141,7 +146,7 @@ export function updateUser(uid: string, patch: Partial<UserAccount>): UserAccoun
 
   // Update current user if it's the same
   const current = getCurrentUser();
-  if (current && current.uid === uid) {
+  if (current && (current.uid === uid || current.email?.toLowerCase() === uid.toLowerCase())) {
     setCurrentUser(users[idx]);
   }
   return users[idx];

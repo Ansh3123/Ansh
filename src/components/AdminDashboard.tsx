@@ -52,6 +52,9 @@ export function AdminDashboard() {
 
   const [newGame, setNewGame] = useState({ id: '', name: '', description: '', winRate: 45, multiplier: 1.27 });
 
+  const [requestFilter, setRequestFilter] = useState<'all' | 'pending' | 'recharge' | 'withdraw'>('all');
+  const [requestSearch, setRequestSearch] = useState('');
+
   useEffect(() => {
     if (profile?.isAdmin) setIsAuthenticated(true);
   }, [profile]);
@@ -86,8 +89,15 @@ export function AdminDashboard() {
     loadData();
     setLoading(false);
 
+    window.addEventListener('app_storage_change', loadData);
+    window.addEventListener('storage', loadData);
+
     const interval = setInterval(loadData, 2000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('app_storage_change', loadData);
+      window.removeEventListener('storage', loadData);
+    };
   }, [isAuthenticated]);
 
   const handleSaveLimits = (e: FormEvent) => {
