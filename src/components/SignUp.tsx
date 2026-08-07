@@ -43,7 +43,16 @@ export function SignUp() {
 
       navigate('/');
     } catch (err: any) {
-      setError(err.message || 'Failed to create an account');
+      console.error(err);
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Email/Password authentication is not enabled in Firebase Console yet. Please enable it under Auth > Sign-in method.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError('This domain is not whitelisted in Firebase Auth. Please add it to Authorized Domains in Firebase Console.');
+      } else if (err.code === 'auth/email-already-in-use') {
+        setError('An account with this email already exists.');
+      } else {
+        setError(err.message || 'Failed to create an account');
+      }
     } finally {
       setLoading(false);
     }

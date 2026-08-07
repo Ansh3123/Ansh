@@ -32,7 +32,16 @@ export function Login() {
       await signInWithEmailAndPassword(auth, email, password);
       navigate('/');
     } catch (err: any) {
-      setError('Invalid email or password');
+      console.error(err);
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Email/Password authentication is not enabled in Firebase Console yet. Please enable it under Auth > Sign-in method.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError('This domain is not whitelisted in Firebase Auth. Please add it to Authorized Domains in Firebase Console.');
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setError('Invalid email or password');
+      } else {
+        setError(err.message || 'Failed to log in');
+      }
     } finally {
       setLoading(false);
     }
