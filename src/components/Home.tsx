@@ -41,7 +41,7 @@ export function Home() {
           setGames(fetchedGames);
         }
       } catch (err) {
-        console.error("Error fetching games:", err);
+        // Fallback default games if offline or uninitialized
       }
     }
     fetchGames();

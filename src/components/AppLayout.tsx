@@ -1,4 +1,4 @@
-import { useState, useRef, MouseEvent } from 'react';
+import { useState, useRef, MouseEvent, useEffect } from 'react';
 import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { auth } from '../lib/firebase';
@@ -21,6 +21,10 @@ export function AppLayout() {
   const [clickCount, setClickCount] = useState(0);
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
+
   const handleBack = () => {
     if (window.history.length > 1 && location.pathname !== '/') {
       navigate(-1);
@@ -31,14 +35,13 @@ export function AppLayout() {
 
   const handleTitleClick = (e: MouseEvent) => {
     e.preventDefault();
-    setClickCount(prev => {
-      const newCount = prev + 1;
-      if (newCount >= 4) {
-        navigate('/admin');
-        return 0;
-      }
-      return newCount;
-    });
+    const newCount = clickCount + 1;
+    if (newCount >= 4) {
+      setClickCount(0);
+      navigate('/admin');
+      return;
+    }
+    setClickCount(newCount);
 
     if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
     clickTimeoutRef.current = setTimeout(() => setClickCount(0), 1000);

@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent, MouseEvent } from 'react';
 import { useAuthStore } from '../store/authStore';
-import { collection, query, limit, getDocs, doc, updateDoc, increment, orderBy, onSnapshot, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, query, limit, getDocs, getDoc, doc, updateDoc, increment, orderBy, onSnapshot, setDoc, deleteDoc, runTransaction } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Users, Activity, Settings, Gift, ArrowDownToLine, ArrowUpFromLine, Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -19,18 +19,7 @@ export function AdminDashboard() {
   const [grantAmount, setGrantAmount] = useState(10);
   const [selectedUser, setSelectedUser] = useState<string>('');
   const [userSearchQuery, setUserSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'games' | 'live' | 'settings' | 'domains'>('requests');
-  const [authorizedDomains, setAuthorizedDomains] = useState<string[]>([
-    'ansh-risknreward.vercel.app',
-    'ais-dev-uhulvo4bxmmldlfknoraaj-266190708646.asia-southeast1.run.app',
-    'ais-pre-uhulvo4bxmmldlfknoraaj-266190708646.asia-southeast1.run.app',
-    'ai.studio',
-    'run.app',
-    'asia-southeast1.run.app',
-    'localhost',
-    '127.0.0.1'
-  ]);
-  const [newDomainInput, setNewDomainInput] = useState('');
+  const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'games' | 'live' | 'settings'>('requests');
   const [limits, setLimits] = useState({ 
     minRecharge: 10, 
     minWithdraw: 30,
@@ -59,36 +48,42 @@ export function AdminDashboard() {
   useEffect(() => {
     if (!isAuthenticated) return;
     
-    // Fetch users
-    const fetchUsers = async () => {
-      const q = query(collection(db, 'users'), limit(500));
-      const snap = await getDocs(q);
-      setUsers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    };
-    fetchUsers();
+    // Listen to users live
+    const qUsers = query(collection(db, 'users'), limit(500));
+    const unsubUsers = onSnapshot(qUsers, (snap) => {
+      const userList = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      userList.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
+      setUsers(userList);
+    }, (err) => console.error("Error loading users:", err));
 
     // Listen to requests
-    const qReq = query(collection(db, 'payment_requests'), orderBy('timestamp', 'desc'), limit(50));
+    const qReq = query(collection(db, 'payment_requests'), limit(100));
     const unsubReq = onSnapshot(qReq, (snap) => {
-      setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+      const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      list.sort((a: any, b: any) => {
+        const tA = typeof a.timestamp === 'number' ? a.timestamp : (a.timestamp?.toDate ? a.timestamp.toDate().getTime() : 0);
+        const tB = typeof b.timestamp === 'number' ? b.timestamp : (b.timestamp?.toDate ? b.timestamp.toDate().getTime() : 0);
+        return tB - tA;
+      });
+      setRequests(list);
+    }, (err) => console.error("Error loading payment requests:", err));
 
     // Listen to games config
     const qGames = query(collection(db, 'games'));
     const unsubGames = onSnapshot(qGames, (snap) => {
       setGames(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (err) => console.error("Error loading games:", err));
 
     // Listen to live sessions
-    const qLive = query(collection(db, 'live_sessions'), orderBy('lastActive', 'desc'));
+    const qLive = query(collection(db, 'live_sessions'), limit(100));
     const unsubLive = onSnapshot(qLive, (snap) => {
       setLiveSessions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
+    }, (err) => console.error("Error loading live sessions:", err));
 
     // Fetch limits
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'limits'), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'limits'), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
         setLimits(prev => ({ 
           ...prev, 
           minRecharge: data.minRecharge ?? prev.minRecharge, 
@@ -99,67 +94,18 @@ export function AdminDashboard() {
       }
     });
 
-    // Fetch authorized domains
-    const unsubDomains = onSnapshot(doc(db, 'settings', 'authorized_domains'), (docSnap) => {
-      if (docSnap.exists() && docSnap.data().domains) {
-        setAuthorizedDomains(docSnap.data().domains);
-      } else {
-        setDoc(doc(db, 'settings', 'authorized_domains'), { 
-          domains: [
-            'ansh-risknreward.vercel.app',
-            'ais-dev-uhulvo4bxmmldlfknoraaj-266190708646.asia-southeast1.run.app',
-            'ais-pre-uhulvo4bxmmldlfknoraaj-266190708646.asia-southeast1.run.app',
-            'ai.studio',
-            'run.app',
-            'asia-southeast1.run.app',
-            'localhost',
-            '127.0.0.1'
-          ] 
-        }, { merge: true });
-      }
-    });
-
     setLoading(false);
 
     return () => {
+      unsubUsers();
       unsubReq();
       unsubGames();
       unsubLive();
       unsubSettings();
-      unsubDomains();
     };
   }, [isAuthenticated]);
 
-  const handleAddDomain = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!newDomainInput.trim()) return;
-    const cleaned = newDomainInput.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
-    if (authorizedDomains.includes(cleaned)) {
-      alert('Domain already exists!');
-      return;
-    }
-    const updated = [...authorizedDomains, cleaned];
-    try {
-      await setDoc(doc(db, 'settings', 'authorized_domains'), { domains: updated }, { merge: true });
-      setAuthorizedDomains(updated);
-      setNewDomainInput('');
-      alert(`Domain "${cleaned}" successfully added to Firebase authorized domains!`);
-    } catch (err) {
-      console.error(err);
-      alert('Failed to add domain.');
-    }
-  };
 
-  const handleRemoveDomain = async (domainToRemove: string) => {
-    const updated = authorizedDomains.filter(d => d !== domainToRemove);
-    try {
-      await setDoc(doc(db, 'settings', 'authorized_domains'), { domains: updated }, { merge: true });
-      setAuthorizedDomains(updated);
-    } catch (err) {
-      console.error(err);
-      alert('Failed to remove domain.');
-    }
-  };
 
   const handleSaveLimits = async (e: FormEvent) => {
     e.preventDefault();
@@ -181,34 +127,205 @@ export function AdminDashboard() {
     }
   };
 
-  const handleProcessRequest = async (reqId: string, uid: string, amount: number, type: string, action: 'approved' | 'rejected') => {
+  const handleProcessRequest = async (reqId: string, uid: string, rawAmount: any, type: string, action: 'approved' | 'rejected') => {
     try {
-      await updateDoc(doc(db, 'payment_requests', reqId), { status: action });
-      
-      if (action === 'approved') {
-        const value = type === 'recharge' ? amount : -amount;
-        await setDoc(doc(db, 'users', uid), {
-          credits: increment(value)
-        }, { merge: true });
-        alert(`Request ${action} and wallet updated.`);
-      } else {
-        alert(`Request ${action}.`);
+      if (!reqId) {
+        alert('Request ID is missing.');
+        return;
       }
-    } catch (err) {
-      console.error(err);
-      alert('Error processing request.');
+
+      let finalUserName = '';
+      let finalNewBalance = 0;
+      let processedAmount = 0;
+
+      await runTransaction(db, async (transaction) => {
+        const reqRef = doc(db, 'payment_requests', reqId);
+        const reqSnap = await transaction.get(reqRef);
+
+        if (!reqSnap.exists()) {
+          throw new Error('Payment request does not exist in database.');
+        }
+
+        const reqData = reqSnap.data();
+        if (reqData.status !== 'pending') {
+          throw new Error(`This request has already been processed (current status: "${reqData.status}"). Duplicate processing is prevented.`);
+        }
+
+        const userId = reqData.uid || uid;
+        if (!userId) {
+          throw new Error('User ID is missing on this payment request.');
+        }
+
+        // Always read amount directly from Firestore document for security
+        processedAmount = Number(reqData.amount ?? rawAmount);
+        if (isNaN(processedAmount) || processedAmount <= 0) {
+          throw new Error('Invalid payment request amount.');
+        }
+
+        if (type === 'recharge' && action === 'approved') {
+          const utr = (reqData.utrNumber || '').toString().trim();
+          if (!/^\d{12}$/.test(utr)) {
+            throw new Error(`Cannot approve: UTR number ("${utr || 'None'}") must be exactly 12 digits!`);
+          }
+        }
+
+        const userRef = doc(db, 'users', userId);
+        const userSnap = await transaction.get(userRef);
+
+        let currentCredits = 0;
+        let userEmail = reqData.email || '';
+        let displayName = reqData.displayName || 'User';
+
+        if (userSnap.exists()) {
+          const uData = userSnap.data();
+          currentCredits = Number(uData.credits) || 0;
+          if (uData.email) userEmail = uData.email;
+          if (uData.displayName) displayName = uData.displayName;
+        }
+
+        finalUserName = displayName || userEmail || userId;
+
+        if (type === 'recharge') {
+          if (action === 'approved') {
+            finalNewBalance = currentCredits + processedAmount;
+            if (userSnap.exists()) {
+              transaction.update(userRef, {
+                credits: finalNewBalance,
+                hasBetAfterDeposit: false
+              });
+            } else {
+              transaction.set(userRef, {
+                uid: userId,
+                email: userEmail,
+                displayName: displayName,
+                credits: finalNewBalance,
+                freeCredits: 0,
+                hasBetAfterDeposit: false,
+                createdAt: Date.now()
+              });
+            }
+          } else {
+            finalNewBalance = currentCredits;
+          }
+        } else if (type === 'withdraw') {
+          if (action === 'approved') {
+            finalNewBalance = currentCredits;
+          } else {
+            // Refund deducted credits back to user
+            finalNewBalance = currentCredits + processedAmount;
+            if (userSnap.exists()) {
+              transaction.update(userRef, {
+                credits: finalNewBalance
+              });
+            } else {
+              transaction.set(userRef, {
+                uid: userId,
+                email: userEmail,
+                displayName: displayName,
+                credits: finalNewBalance,
+                freeCredits: 0,
+                createdAt: Date.now()
+              });
+            }
+          }
+        }
+
+        // Update request status
+        transaction.update(reqRef, {
+          status: action,
+          processedAt: Date.now(),
+          processedBy: profile?.email || 'admin'
+        });
+
+        // Record transaction record
+        const txRef = doc(collection(db, 'transactions'));
+        transaction.set(txRef, {
+          requestId: reqId,
+          userId: userId,
+          userEmail: userEmail,
+          amount: processedAmount,
+          type: type,
+          status: action,
+          utrNumber: reqData.utrNumber || null,
+          timestamp: Date.now(),
+          adminId: profile?.email || 'admin'
+        });
+      });
+
+      if (type === 'recharge') {
+        if (action === 'approved') {
+          alert(`Recharge approved successfully!\n\nUser: ${finalUserName}\nCredited Amount: ${processedAmount} Demo Credits\nNew Wallet Balance: ${finalNewBalance} Demo Credits`);
+        } else {
+          alert(`Recharge request has been rejected.`);
+        }
+      } else if (type === 'withdraw') {
+        if (action === 'approved') {
+          alert(`Withdrawal request of ${processedAmount} Demo Credits approved and marked as PAID.`);
+        } else {
+          alert(`Withdrawal request rejected. ${processedAmount} Demo Credits refunded to user's wallet.\nNew Balance: ${finalNewBalance} Demo Credits.`);
+        }
+      }
+    } catch (err: any) {
+      console.error("Error processing request in Firestore transaction:", err);
+      alert(`Approval/Processing Failed: ${err?.message || 'Unknown error'}`);
     }
   };
 
   const handleGrantCredits = async () => {
     if (!selectedUser || grantAmount === 0) return;
     try {
-      await setDoc(doc(db, 'users', selectedUser), { credits: increment(grantAmount) }, { merge: true });
-      alert('Credits updated successfully');
+      let finalUserName = '';
+      let finalNewBalance = 0;
+
+      await runTransaction(db, async (transaction) => {
+        const userRef = doc(db, 'users', selectedUser);
+        const userSnap = await transaction.get(userRef);
+
+        const targetUser = users.find(u => u.id === selectedUser);
+        let userEmail = targetUser?.email || '';
+        let displayName = targetUser?.displayName || 'User';
+
+        let currentCredits = 0;
+        if (userSnap.exists()) {
+          const uData = userSnap.data();
+          currentCredits = Number(uData.credits) || 0;
+          if (uData.email) userEmail = uData.email;
+          if (uData.displayName) displayName = uData.displayName;
+        }
+
+        finalUserName = displayName || userEmail || selectedUser;
+        finalNewBalance = currentCredits + grantAmount;
+
+        if (userSnap.exists()) {
+          transaction.update(userRef, { credits: finalNewBalance });
+        } else {
+          transaction.set(userRef, {
+            uid: selectedUser,
+            email: userEmail,
+            displayName: displayName,
+            credits: finalNewBalance,
+            freeCredits: 0,
+            createdAt: Date.now()
+          });
+        }
+
+        const txRef = doc(collection(db, 'transactions'));
+        transaction.set(txRef, {
+          userId: selectedUser,
+          userEmail: userEmail,
+          amount: grantAmount,
+          type: 'manual_grant',
+          status: 'completed',
+          timestamp: Date.now(),
+          adminId: profile?.email || 'admin'
+        });
+      });
+
+      alert(`Successfully credited ${grantAmount} Demo Credits to ${finalUserName}!\nNew wallet balance: ${finalNewBalance} Demo Credits.`);
       setGrantAmount(10);
-    } catch (error) {
-      console.error(error);
-      alert('Failed to update credits');
+    } catch (error: any) {
+      console.error("Grant credits error:", error);
+      alert(`Failed to grant credits: ${error?.message || 'Unknown error'}`);
     }
   };
 
@@ -285,66 +402,7 @@ export function AdminDashboard() {
         <button onClick={() => setActiveTab('users')} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === 'users' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>Users & Manual Grant</button>
         <button onClick={() => setActiveTab('live')} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === 'live' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>Live Players</button>
         <button onClick={() => setActiveTab('settings')} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === 'settings' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>Settings</button>
-        <button onClick={() => setActiveTab('domains')} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === 'domains' ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500 hover:text-neutral-300'}`}>Authorized Domains</button>
       </div>
-
-      {activeTab === 'domains' && (
-        <div className="max-w-2xl bg-neutral-900 border border-neutral-800 rounded-2xl p-6 space-y-6">
-          <h2 className="text-lg font-medium">Authorized Domains Whitelist</h2>
-          <p className="text-sm text-neutral-400">
-            Manage authorized domains for Firebase Auth and hosting integration stored securely in Firebase Firestore.
-          </p>
-
-          <form onSubmit={handleAddDomain} className="flex gap-3">
-            <input
-              type="text"
-              placeholder="e.g. ansh-risknreward.vercel.app"
-              value={newDomainInput}
-              onChange={(e) => setNewDomainInput(e.target.value)}
-              className="flex-1 bg-neutral-950 border border-neutral-800 rounded-xl px-4 py-2.5 text-neutral-100 placeholder:text-neutral-600 focus:outline-none focus:border-neutral-600 text-sm"
-            />
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-neutral-100 hover:bg-white text-neutral-950 font-semibold rounded-xl text-sm transition-colors"
-            >
-              Add Domain
-            </button>
-          </form>
-
-          <div className="space-y-3">
-            {authorizedDomains.map((domain) => (
-              <div key={domain} className="p-4 bg-neutral-950 border border-neutral-800 rounded-xl flex items-center justify-between">
-                <div>
-                  <div className="font-mono text-sm text-neutral-200">{domain}</div>
-                  <div className="text-xs text-emerald-400 mt-1">● Whitelisted & Stored in Firebase</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(domain);
-                      alert('Domain copied to clipboard!');
-                    }}
-                    className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg text-xs font-medium transition-colors"
-                  >
-                    Copy
-                  </button>
-                  {domain !== 'ansh-risknreward.vercel.app' && (
-                    <button
-                      onClick={() => handleRemoveDomain(domain)}
-                      className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs font-medium transition-colors"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="text-xs text-neutral-500 leading-relaxed bg-neutral-950 p-4 rounded-xl border border-neutral-800">
-            <span className="font-semibold text-neutral-300">Note on Firebase Authentication:</span> Firebase Auth requires authorized domains to be added in your Firebase Console (Authentication &gt; Settings &gt; Authorized domains) if you host your frontend on custom domains like Vercel.
-          </div>
-        </div>
-      )}
 
       {activeTab === 'settings' && (
         <div className="max-w-2xl bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
@@ -477,19 +535,39 @@ export function AdminDashboard() {
                     {req.utrNumber && <div className="text-xs text-yellow-500 mt-1 font-mono">UTR: {req.utrNumber}</div>}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setSelectedUser(req.uid);
+                      setActiveTab('users');
+                    }}
+                    className="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-medium rounded-lg transition-colors border border-neutral-700/50"
+                    title="Select user in Manual Balance Grant panel"
+                  >
+                    Manage User
+                  </button>
                   {req.status === 'pending' ? (
                     <>
-                      <button onClick={() => handleProcessRequest(req.id, req.uid, req.amount, req.type, 'approved')} className="p-2 bg-green-950 text-green-500 hover:bg-green-900 rounded-lg transition-colors">
-                        <Check size={16} />
+                      <button 
+                        onClick={() => handleProcessRequest(req.id, req.uid, req.amount, req.type, 'approved')} 
+                        className="px-3 py-1.5 bg-green-950 text-green-400 hover:bg-green-900 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors border border-green-800/50"
+                        title={req.type === 'withdraw' ? "Mark Paid & Approve" : "Approve & Credit Balance"}
+                      >
+                        <Check size={14} />
+                        {req.type === 'withdraw' ? 'Mark Paid' : 'Approve'}
                       </button>
-                      <button onClick={() => handleProcessRequest(req.id, req.uid, req.amount, req.type, 'rejected')} className="p-2 bg-red-950 text-red-500 hover:bg-red-900 rounded-lg transition-colors">
-                        <X size={16} />
+                      <button 
+                        onClick={() => handleProcessRequest(req.id, req.uid, req.amount, req.type, 'rejected')} 
+                        className="px-3 py-1.5 bg-red-950 text-red-400 hover:bg-red-900 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors border border-red-800/50"
+                        title="Reject Request"
+                      >
+                        <X size={14} />
+                        Reject
                       </button>
                     </>
                   ) : (
-                    <span className={`text-xs font-medium ${req.status === 'approved' ? 'text-green-500' : 'text-red-500'}`}>
-                      {req.status.toUpperCase()}
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${req.status === 'approved' || req.status === 'paid' ? 'bg-green-950 text-green-400 border border-green-800/50' : 'bg-red-950 text-red-400 border border-red-800/50'}`}>
+                      {req.status === 'approved' && req.type === 'withdraw' ? 'PAID' : req.status.toUpperCase()}
                     </span>
                   )}
                 </div>
@@ -566,27 +644,43 @@ export function AdminDashboard() {
       {activeTab === 'users' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 md:col-span-1 h-fit">
-            <h2 className="text-lg font-medium mb-4">Manual Grant</h2>
+            <h2 className="text-lg font-medium mb-4">Manual Balance Grant</h2>
             <div className="space-y-4">
-              <select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2.5 text-neutral-100">
-                <option value="">-- Select a user --</option>
-                {users.filter(u => 
-                  u.displayName?.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
-                  u.email?.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
-                  u.id?.toLowerCase().includes(userSearchQuery.toLowerCase())
-                ).map(u => (
-                  <option key={u.id} value={u.id}>{u.displayName} - {u.credits} INR</option>
-                ))}
-              </select>
-              <input type="number" value={grantAmount} onChange={(e) => setGrantAmount(parseInt(e.target.value) || 0)} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2.5 text-neutral-100" />
-              <button onClick={handleGrantCredits} disabled={!selectedUser} className="w-full bg-neutral-100 text-neutral-950 font-medium rounded-lg px-4 py-2.5 hover:bg-white transition-colors disabled:opacity-50">
-                Update Credits
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">Select User ({users.length} total)</label>
+                <select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2.5 text-neutral-100 text-sm">
+                  <option value="">-- Select a user --</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.displayName || u.email || u.id} ({u.credits ?? 0} INR)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-neutral-400 mb-1">Amount to Add (INR)</label>
+                <input 
+                  type="number" 
+                  value={grantAmount} 
+                  onChange={(e) => setGrantAmount(parseInt(e.target.value) || 0)} 
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2.5 text-neutral-100 text-sm"
+                  placeholder="e.g. 100" 
+                />
+              </div>
+              <button 
+                onClick={handleGrantCredits} 
+                disabled={!selectedUser || grantAmount === 0} 
+                className="w-full bg-green-600 text-white font-medium rounded-lg px-4 py-2.5 hover:bg-green-500 transition-colors disabled:opacity-50 text-sm"
+              >
+                Add Balance to Selected User
               </button>
             </div>
           </div>
           
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 md:col-span-2">
-            <h2 className="text-lg font-medium mb-4">Users List</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-medium">Registered Users ({users.length})</h2>
+            </div>
             <div className="mb-4">
               <input
                 type="text"
@@ -596,27 +690,39 @@ export function AdminDashboard() {
                 className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2 text-sm text-neutral-100 placeholder-neutral-500 focus:outline-none focus:border-neutral-600 transition-colors"
               />
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
               <table className="w-full text-left text-sm">
-                <thead className="text-neutral-400 border-b border-neutral-800">
+                <thead className="text-neutral-400 border-b border-neutral-800 sticky top-0 bg-neutral-900">
                   <tr>
                     <th className="pb-3 font-medium">User</th>
                     <th className="pb-3 font-medium">Email</th>
                     <th className="pb-3 font-medium">Credits</th>
+                    <th className="pb-3 font-medium text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800">
                   {users.filter(u => 
-                    u.displayName?.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
-                    u.email?.toLowerCase().includes(userSearchQuery.toLowerCase()) || 
-                    u.id?.toLowerCase().includes(userSearchQuery.toLowerCase())
+                    (u.displayName || u.email || u.id || '').toLowerCase().includes(userSearchQuery.toLowerCase())
                   ).map(u => (
-                    <tr key={u.id}>
-                      <td className="py-3 font-medium">{u.displayName}</td>
-                      <td className="py-3 text-neutral-400">{u.email}</td>
-                      <td className="py-3">{u.credits} INR</td>
+                    <tr key={u.id} className={selectedUser === u.id ? "bg-neutral-800/50" : ""}>
+                      <td className="py-3 font-medium">{u.displayName || u.email?.split('@')[0] || u.id}</td>
+                      <td className="py-3 text-neutral-400 text-xs">{u.email || 'N/A'}</td>
+                      <td className="py-3 font-semibold text-green-400">{u.credits ?? 0} INR</td>
+                      <td className="py-3 text-right">
+                        <button
+                          onClick={() => setSelectedUser(u.id)}
+                          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${selectedUser === u.id ? 'bg-green-600 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200'}`}
+                        >
+                          {selectedUser === u.id ? 'Selected' : 'Select'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
+                  {users.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-6 text-center text-neutral-500">No registered users found.</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

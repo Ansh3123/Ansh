@@ -18,7 +18,7 @@ export function Leaderboard() {
         const querySnapshot = await getDocs(q);
         setLeaders(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       } catch (error) {
-        console.error("Error fetching leaders:", error);
+        // Fallback if offline
       } finally {
         setLoading(false);
       }

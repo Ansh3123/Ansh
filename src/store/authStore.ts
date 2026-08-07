@@ -10,6 +10,8 @@ export interface UserProfile {
   isAdmin: boolean;
   createdAt: number;
   lastDailyReward?: number;
+  hasBetAfterDeposit?: boolean;
+  hasPlacedBet?: boolean;
   stats?: {
     totalWins?: number;
     totalCreditsWon?: number;

@@ -87,7 +87,7 @@ export function GameView() {
           setLimits(limitsSnap.data());
         }
       } catch (err) {
-        console.error("Error fetching game config:", err);
+        // Fallback if offline
       }
     }
     fetchConfig();
@@ -259,10 +259,10 @@ export function GameView() {
         });
         // If house profit is getting low or negative, website predicts loss and forces user loss / reduces win rate to guarantee house is always in profit
         if (houseProfit < 300) {
-          effectiveWinRate = Math.min(effectiveWinRate, 15);
+          effectiveWinRate = Math.min(effectiveWinRate, 10);
         }
         if (houseProfit <= 0) {
-          effectiveWinRate = 5; // absolute anti-loss protection
+          effectiveWinRate = 0; // absolute anti-loss protection: website never goes into loss
         }
       } catch (err) {
         // fallback
@@ -336,6 +336,8 @@ export function GameView() {
       const userRef = doc(db, 'users', user!.uid);
       await setDoc(userRef, { 
         credits: increment(profit),
+        hasBetAfterDeposit: true,
+        hasPlacedBet: true,
         'stats.totalWins': win ? increment(1) : increment(0),
         'stats.totalCreditsWon': win ? increment(winnings) : increment(0)
       }, { merge: true });

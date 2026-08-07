@@ -51,7 +51,7 @@ export function Profile() {
         const aSnap = await getDocs(aQ);
         setAchievements(aSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Achievement[]);
       } catch (error) {
-        console.error("Error fetching data:", error);
+        // Fallback if offline
       } finally {
         setLoading(false);
       }

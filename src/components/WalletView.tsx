@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, doc, getDoc, setDoc, updateDoc, increment } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, getDocs, orderBy, doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Wallet, ArrowDownToLine, ArrowUpFromLine, Clock, Gift } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -19,30 +19,32 @@ export function WalletView() {
   const [utrNumber, setUtrNumber] = useState('');
 
   useEffect(() => {
-    async function fetchData() {
-      if (!user) return;
-      try {
-        const limitsSnap = await getDoc(doc(db, 'settings', 'limits'));
-        if (limitsSnap.exists()) {
-          const data = limitsSnap.data();
-          setLimits({ 
-            minRecharge: data.minRecharge ?? 10, 
-            minWithdraw: data.minWithdraw ?? 30 
-          });
-        }
-
-        const q = query(
-          collection(db, 'payment_requests'),
-          where('uid', '==', user.uid),
-          orderBy('timestamp', 'desc')
-        );
-        const snap = await getDocs(q);
-        setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } catch (err) {
-        console.error("Error fetching data:", err);
+    if (!user) return;
+    
+    getDoc(doc(db, 'settings', 'limits')).then((limitsSnap) => {
+      if (limitsSnap.exists()) {
+        const data = limitsSnap.data();
+        setLimits({ 
+          minRecharge: data.minRecharge ?? 10, 
+          minWithdraw: data.minWithdraw ?? 30 
+        });
       }
-    }
-    fetchData();
+    }).catch(() => {});
+
+    const q = query(
+      collection(db, 'payment_requests'),
+      where('uid', '==', user.uid),
+      orderBy('timestamp', 'desc')
+    );
+    const unsubscribeRequests = onSnapshot(q, (snap) => {
+      setRequests(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    }, (err) => {
+      console.warn("Requests snapshot error:", err);
+    });
+
+    return () => {
+      unsubscribeRequests();
+    };
   }, [user]);
 
   const handlePayClick = () => {
@@ -61,59 +63,78 @@ export function WalletView() {
       alert(`Minimum recharge is ${limits.minRecharge}.`);
       return;
     }
-    if (activeTab === 'withdraw' && amount < limits.minWithdraw) {
-      alert(`Minimum withdrawal is ${limits.minWithdraw}.`);
-      return;
-    }
-    if (activeTab === 'withdraw' && amount > (displayProfile.credits || 0)) {
-      alert("Insufficient Demo Credits.");
-      return;
+    if (activeTab === 'withdraw') {
+      if (amount < limits.minWithdraw) {
+        alert(`Minimum withdrawal is ${limits.minWithdraw}.`);
+        return;
+      }
+      if (amount > (displayProfile.credits || 0)) {
+        alert("Insufficient Credits.");
+        return;
+      }
+      if (displayProfile.hasBetAfterDeposit === false) {
+        alert("Withdrawal Restricted: You must place at least 1 bet after your deposit before requesting a withdrawal.");
+        return;
+      }
     }
 
-    if (activeTab === 'recharge' && !utrNumber.trim()) {
-      alert("Please enter the UTR number for verification.");
-      return;
+    if (activeTab === 'recharge') {
+      const cleanUtr = utrNumber.trim();
+      if (!cleanUtr) {
+        alert("Please enter the UTR number for verification.");
+        return;
+      }
+      if (!/^\d{12}$/.test(cleanUtr)) {
+        alert("UTR number must be exactly 12 digits! Please check your UTR number and try again.");
+        return;
+      }
     }
 
     setLoading(true);
     try {
+      const reqAmount = Number(amount);
+      const docId = 'req_' + user.uid + '_' + Date.now();
       const newRequest = {
         uid: user.uid,
-        email: displayProfile.email,
+        email: displayProfile.email || user.email || '',
         displayName: displayProfile.displayName || user.displayName || user.email?.split('@')[0] || 'User',
         type: activeTab,
-        amount,
-        utrNumber: activeTab === 'recharge' ? utrNumber : null,
+        amount: reqAmount,
+        utrNumber: activeTab === 'recharge' ? utrNumber.trim() : null,
         status: 'pending',
-        timestamp: serverTimestamp()
+        timestamp: Date.now()
       };
 
-      const docRef = await addDoc(collection(db, 'payment_requests'), newRequest);
+      await setDoc(doc(db, 'payment_requests', docId), newRequest, { merge: true });
       
       if (activeTab === 'withdraw') {
-        const userRef = doc(db, 'users', user!.uid);
-        await setDoc(userRef, {
-          credits: increment(-amount)
-        }, { merge: true });
-        updateCredits(-amount);
+        const userRef = doc(db, 'users', user.uid);
+        try {
+          await setDoc(userRef, {
+            credits: increment(-reqAmount)
+          }, { merge: true });
+        } catch (e) {
+          console.error("Error updating user credits in Firestore:", e);
+        }
+        updateCredits(-reqAmount);
       }
 
-      setRequests([{ id: docRef.id, ...newRequest, timestamp: { toDate: () => new Date() } }, ...requests]);
+      setRequests([{ id: docId, ...newRequest, timestamp: { toDate: () => new Date() } }, ...requests]);
       
       playSound('recharge');
       
       if (activeTab === 'recharge') {
-        alert("Recharge request submitted successfully for approval.");
+        alert("Recharge request submitted successfully! Your wallet balance will be credited once approved by admin.");
         setAwaitingUtr(false);
         setUtrNumber('');
       } else {
-        alert("Withdrawal request submitted successfully. Amount deducted from your wallet.");
+        alert("Withdrawal request submitted successfully.");
       }
       
       setAmount(0);
     } catch (err) {
       console.error(err);
-      alert("Failed to submit request.");
+      alert("Error submitting request. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -267,18 +288,31 @@ export function WalletView() {
 
               {activeTab === 'withdraw' && (
                 <motion.div key="withdraw" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-                  <div className="p-4 bg-orange-950/20 border border-orange-900/50 rounded-xl">
-                    <h3 className="text-sm font-medium text-orange-400 mb-2">Withdrawal Rules</h3>
+                  <div className="p-4 bg-orange-950/20 border border-orange-900/50 rounded-xl space-y-2">
+                    <h3 className="text-sm font-medium text-orange-400">Withdrawal Rules</h3>
                     <p className="text-xs text-neutral-400 leading-relaxed">
                       Minimum withdrawal is {limits.minWithdraw} INR. Withdrawals will be processed to your registered payment details.
                     </p>
+                    <p className="text-xs text-yellow-400 font-medium">
+                      📌 Requirement: You must place at least 1 bet after your deposit before requesting a withdrawal.
+                    </p>
                   </div>
+
+                  {displayProfile.hasBetAfterDeposit === false && (
+                    <div className="p-3 bg-red-950/40 border border-red-800/60 rounded-xl flex items-center justify-between text-xs text-red-300">
+                      <span>⚠️ You must place at least 1 bet after depositing before you can request a withdrawal.</span>
+                      <a href="/" className="px-2.5 py-1 bg-red-900 text-white rounded font-medium hover:bg-red-800 transition-colors shrink-0 ml-2">
+                        Play Now
+                      </a>
+                    </div>
+                  )}
+
                   <div>
                     <label className="block text-sm font-medium text-neutral-400 mb-1">Withdrawal Amount (Min {limits.minWithdraw})</label>
                     <input
                       type="number"
                       min={limits.minWithdraw}
-                      max={profile.credits}
+                      max={displayProfile.credits}
                       value={amount || ''}
                       onChange={(e) => setAmount(parseInt(e.target.value) || 0)}
                       className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-neutral-100 focus:outline-none focus:border-neutral-600 transition-colors"
@@ -286,7 +320,7 @@ export function WalletView() {
                   </div>
                   <button
                     onClick={handleSubmit}
-                    disabled={loading || amount <= 0 || amount < limits.minWithdraw}
+                    disabled={loading || amount <= 0 || amount < limits.minWithdraw || displayProfile.hasBetAfterDeposit === false}
                     className="w-full mt-6 bg-neutral-100 text-neutral-950 font-medium rounded-lg px-4 py-3 hover:bg-white transition-colors disabled:opacity-50"
                   >
                     {loading ? 'Submitting...' : 'Submit Withdrawal Request'}
