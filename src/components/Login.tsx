@@ -57,8 +57,8 @@ export function Login() {
           uid: user.uid,
           email: user.email,
           displayName: user.displayName || user.email?.split('@')[0],
-          credits: 10,
-          freeCredits: 10,
+          credits: 0,
+          freeCredits: 0,
           isAdmin: isSeniorAdmin,
           createdAt: Date.now(),
         });

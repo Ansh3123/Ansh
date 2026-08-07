@@ -11,7 +11,15 @@ import { Dices, Target, CircleDollarSign, LoaderPinwheel, Gamepad2, Volume2, Vol
 export function GameView() {
   const { gameId } = useParams();
   const navigate = useNavigate();
-  const { user, profile, updateCredits } = useAuthStore();
+  const { user, profile: storeProfile, updateCredits } = useAuthStore();
+  const profile = storeProfile || (user ? {
+    uid: user.uid,
+    email: user.email || '',
+    displayName: user.displayName || user.email?.split('@')[0] || 'User',
+    credits: 0,
+    isAdmin: user.email === 'saritagupta77300@gmail.com',
+    createdAt: Date.now()
+  } : null);
   const [wager, setWager] = useState(1);
   const [playing, setPlaying] = useState(false);
   const [result, setResult] = useState<{ win: boolean, amount: number, message: string } | null>(null);
@@ -135,7 +143,7 @@ export function GameView() {
 
   const handleGoOnline = async () => {
     if (!user) return;
-    if (profile!.credits < 1) {
+    if ((profile?.credits ?? 0) < 1) {
       alert("You need at least 1 INR to go online. Please recharge.");
       navigate('/wallet');
       return;
@@ -152,7 +160,24 @@ export function GameView() {
     }, 3000); // Simulate rejection for now
   };
 
-  if (!profile) return null;
+  if (!user) {
+    return (
+      <div className="max-w-md mx-auto mt-16 text-center bg-neutral-900 border border-neutral-800 rounded-2xl p-8">
+        <h2 className="text-xl font-medium mb-2">Please log in</h2>
+        <p className="text-neutral-400 text-sm mb-6">You need to be logged in to play games.</p>
+        <a href="/login" className="inline-block bg-neutral-100 text-neutral-950 font-medium px-6 py-2.5 rounded-lg hover:bg-white transition-colors">Log In</a>
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="max-w-xl mx-auto mt-20 text-center py-16 bg-neutral-900 border border-neutral-800 rounded-2xl">
+        <div className="w-8 h-8 border-2 border-neutral-600 border-t-neutral-100 rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-neutral-400">Loading game...</p>
+      </div>
+    );
+  }
 
   const defaultGameConfig: Record<string, { name: string, icon: any }> = {
     'dice-roll': { name: 'Dice Roll', icon: Dices },

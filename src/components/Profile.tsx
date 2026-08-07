@@ -81,7 +81,7 @@ export function Profile() {
     uid: user.uid,
     email: user.email || '',
     displayName: user.displayName || user.email?.split('@')[0] || 'User',
-    credits: 10,
+    credits: 0,
     isAdmin: false,
     createdAt: Date.now()
   };

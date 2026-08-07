@@ -64,8 +64,8 @@ export default function App() {
                 uid: currentUser.uid,
                 email: currentUser.email || '',
                 displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-                credits: 10,
-                freeCredits: 10,
+                credits: 0,
+                freeCredits: 0,
                 isAdmin: isSeniorAdmin,
                 createdAt: Date.now()
               };
@@ -78,8 +78,8 @@ export default function App() {
               uid: currentUser.uid,
               email: currentUser.email || '',
               displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-              credits: 10,
-              freeCredits: 10,
+              credits: 0,
+              freeCredits: 0,
               isAdmin: isSeniorAdmin,
               createdAt: Date.now()
             });

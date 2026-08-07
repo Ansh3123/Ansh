@@ -12,7 +12,7 @@ export function WalletView() {
   const [amount, setAmount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [requests, setRequests] = useState<any[]>([]);
-  const [limits, setLimits] = useState({ minRecharge: 1, minWithdraw: 3 });
+  const [limits, setLimits] = useState({ minRecharge: 10, minWithdraw: 30 });
   
   // UTR step
   const [awaitingUtr, setAwaitingUtr] = useState(false);
@@ -26,8 +26,8 @@ export function WalletView() {
         if (limitsSnap.exists()) {
           const data = limitsSnap.data();
           setLimits({ 
-            minRecharge: data.minRecharge ?? 1, 
-            minWithdraw: data.minWithdraw ?? 3 
+            minRecharge: data.minRecharge ?? 10, 
+            minWithdraw: data.minWithdraw ?? 30 
           });
         }
 
@@ -133,8 +133,8 @@ export function WalletView() {
     uid: user.uid,
     email: user.email || '',
     displayName: user.displayName || user.email?.split('@')[0] || 'User',
-    credits: 10,
-    freeCredits: 10,
+    credits: 0,
+    freeCredits: 0,
     isAdmin: false,
     createdAt: Date.now()
   };

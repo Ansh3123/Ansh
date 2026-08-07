@@ -32,8 +32,8 @@ export function AdminDashboard() {
   ]);
   const [newDomainInput, setNewDomainInput] = useState('');
   const [limits, setLimits] = useState({ 
-    minRecharge: 3, 
-    minWithdraw: 5,
+    minRecharge: 10, 
+    minWithdraw: 30,
     winRates: {
       'coin-flip': 45,
       'dice-roll': 45,
