@@ -1,19 +1,19 @@
 import { useState, FormEvent } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { db } from '../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { updateUser, isUsernameTaken } from '../lib/storage';
 import { motion } from 'motion/react';
 import { UserCheck } from 'lucide-react';
 
 export function UsernameModal() {
-  const { user, profile, setProfile } = useAuthStore();
+  const { user, profile, setProfile, loading: authLoading } = useAuthStore();
   const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // If user is not logged in or already has a username, do not show modal
-  if (!user || (profile && profile.username)) {
+  // If auth is loading, user is not logged in, or already has a username, do not show modal
+  if (authLoading || !user || (profile && profile.username)) {
     return null;
   }
 
@@ -39,6 +39,22 @@ export function UsernameModal() {
 
     setLoading(true);
     try {
+      // Robust Firestore uniqueness check across all users
+      try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const takenOnFirestore = usersSnap.docs.some(docSnap => {
+          const data = docSnap.data();
+          return docSnap.id !== user.uid && data.username?.toLowerCase() === clean.toLowerCase();
+        });
+        if (takenOnFirestore) {
+          setError('This username is already taken by another user. Please choose a different one.');
+          setLoading(false);
+          return;
+        }
+      } catch (fbErr) {
+        console.warn("Firestore query error on username check:", fbErr);
+      }
+
       // Update in Firestore if configured
       try {
         await setDoc(doc(db, 'users', user.uid), {

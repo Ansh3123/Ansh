@@ -2,8 +2,9 @@ import { useState, FormEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { registerUser, syncFirebaseUser, isUsernameTaken } from '../lib/storage';
-import { auth, googleProvider } from '../lib/firebase';
+import { auth, googleProvider, db } from '../lib/firebase';
 import { createUserWithEmailAndPassword, signInWithPopup, updateProfile } from 'firebase/auth';
+import { collection, getDocs } from 'firebase/firestore';
 import { motion } from 'motion/react';
 
 export function SignUp() {
@@ -34,6 +35,23 @@ export function SignUp() {
       }
       if (isUsernameTaken(cleanUsername)) {
         throw new Error('Username is already taken. Please choose another one.');
+      }
+
+      // Check Firestore cross-user database
+      try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const takenOnFirestore = usersSnap.docs.some(docSnap => {
+          const data = docSnap.data();
+          return data.username?.toLowerCase() === cleanUsername.toLowerCase();
+        });
+        if (takenOnFirestore) {
+          throw new Error('Username is already taken. Please choose another one.');
+        }
+      } catch (fbErr: any) {
+        console.warn("Firestore query check error on signup:", fbErr);
+        if (fbErr.message?.includes('already taken')) {
+          throw fbErr;
+        }
       }
 
       try {

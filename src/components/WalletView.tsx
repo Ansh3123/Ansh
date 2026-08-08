@@ -11,6 +11,7 @@ export function WalletView() {
   const [activeTab, setActiveTab] = useState<'recharge' | 'withdraw'>('recharge');
   const [amount, setAmount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [requests, setRequests] = useState<any[]>([]);
   const [limits, setLimits] = useState({ minRecharge: 10, minWithdraw: 30 });
   
@@ -91,6 +92,7 @@ export function WalletView() {
     }
 
     setLoading(true);
+    setSubmitted(false);
     try {
       const reqAmount = Number(amount);
       const docId = 'req_' + user.uid + '_' + Date.now();
@@ -123,13 +125,18 @@ export function WalletView() {
       setRequests([{ id: docId, ...newRequest, timestamp: { toDate: () => new Date() } }, ...requests]);
       
       playSound('recharge');
+      setSubmitted(true);
       
       if (activeTab === 'recharge') {
-        alert("Recharge request submitted successfully! Your wallet balance will be credited once approved by admin.");
-        setAwaitingUtr(false);
         setUtrNumber('');
+        setTimeout(() => {
+          setAwaitingUtr(false);
+          setSubmitted(false);
+        }, 2000);
       } else {
-        alert("Withdrawal request submitted successfully.");
+        setTimeout(() => {
+          setSubmitted(false);
+        }, 2000);
       }
       
       setAmount(0);
@@ -273,18 +280,28 @@ export function WalletView() {
                   <div className="flex gap-3 mt-6">
                     <button
                       onClick={() => setAwaitingUtr(false)}
-                      className="flex-1 bg-neutral-800 text-neutral-300 font-medium rounded-lg px-4 py-3 hover:bg-neutral-700 transition-colors"
+                      disabled={loading || submitted}
+                      className="flex-1 bg-neutral-800 text-neutral-300 font-medium rounded-lg px-4 py-3 hover:bg-neutral-700 transition-colors disabled:opacity-50"
                     >
                       Back
                     </button>
                     <button
                       onClick={handleSubmit}
-                      disabled={loading || !utrNumber.trim()}
-                      className="flex-[2] bg-neutral-100 text-neutral-950 font-medium rounded-lg px-4 py-3 hover:bg-white transition-colors disabled:opacity-50"
+                      disabled={loading || !utrNumber.trim() || submitted}
+                      className={`flex-[2] font-medium rounded-lg px-4 py-3 transition-colors ${submitted ? 'bg-green-600 text-white' : 'bg-neutral-100 text-neutral-950 hover:bg-white'} disabled:opacity-50`}
                     >
-                      {loading ? 'Submitting...' : 'Submit Request'}
+                      {loading ? 'Submitting...' : submitted ? 'Submitted! ✓' : 'Submit Request'}
                     </button>
                   </div>
+                  {submitted && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 bg-green-950/40 border border-green-800/60 rounded-xl text-xs text-green-400 text-center font-medium mt-4"
+                    >
+                      🎉 Recharge request submitted! Balance will update once approved by admin.
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
 
@@ -315,18 +332,28 @@ export function WalletView() {
                       type="number"
                       min={limits.minWithdraw}
                       max={displayProfile.credits}
+                      disabled={loading || submitted}
                       value={amount || ''}
                       onChange={(e) => setAmount(parseInt(e.target.value) || 0)}
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-neutral-100 focus:outline-none focus:border-neutral-600 transition-colors"
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-neutral-100 focus:outline-none focus:border-neutral-600 transition-colors disabled:opacity-50"
                     />
                   </div>
                   <button
                     onClick={handleSubmit}
-                    disabled={loading || amount <= 0 || amount < limits.minWithdraw || displayProfile.hasBetAfterDeposit === false}
-                    className="w-full mt-6 bg-neutral-100 text-neutral-950 font-medium rounded-lg px-4 py-3 hover:bg-white transition-colors disabled:opacity-50"
+                    disabled={loading || amount <= 0 || amount < limits.minWithdraw || displayProfile.hasBetAfterDeposit === false || submitted}
+                    className={`w-full mt-6 font-medium rounded-lg px-4 py-3 transition-colors ${submitted ? 'bg-green-600 text-white' : 'bg-neutral-100 text-neutral-950 hover:bg-white'} disabled:opacity-50`}
                   >
-                    {loading ? 'Submitting...' : 'Submit Withdrawal Request'}
+                    {loading ? 'Submitting...' : submitted ? 'Submitted! ✓' : 'Submit Withdrawal Request'}
                   </button>
+                  {submitted && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-3 bg-green-950/40 border border-green-800/60 rounded-xl text-xs text-green-400 text-center font-medium mt-4"
+                    >
+                      🎉 Withdrawal request submitted successfully!
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>

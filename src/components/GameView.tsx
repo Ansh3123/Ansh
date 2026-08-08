@@ -239,13 +239,13 @@ export function GameView() {
 
     if (forcedOutcome === 'win') {
       win = true;
-      multiplier = dbConfig ? dbConfig.multiplier : 2;
-      message = 'Admin granted win!';
+      multiplier = dbConfig ? dbConfig.multiplier : 1.27;
+      message = 'Won of + 27% of the bet amount!';
       outcomeValue = gameId === 'coin-flip' ? coinChoice : gameId === 'dice-roll' ? diceNumberChoice : null;
     } else if (forcedOutcome === 'lose') {
       win = false;
       multiplier = 0;
-      message = 'Better luck next time.';
+      message = 'Loss of bet amount';
       outcomeValue = gameId === 'coin-flip' ? (coinChoice === 'heads' ? 'tails' : 'heads') : null;
     } else {
       // Normal logic with anti-loss prediction & 45% default win rate
@@ -274,7 +274,7 @@ export function GameView() {
       if (dbConfig) {
         win = random < winProbability;
         multiplier = win ? dbConfig.multiplier : 0;
-        message = win ? `You win! ${multiplier}x Payout` : 'Better luck next time.';
+        message = win ? 'Won of + 27% of the bet amount!' : 'Loss of bet amount';
       } else {
         if (gameId === 'coin-flip') {
           win = random < winProbability;
@@ -282,7 +282,7 @@ export function GameView() {
           outcomeValue = resultFace;
           const mult = limits?.multipliers?.['coin-flip'] ?? 1.27;
           multiplier = win ? mult : 0;
-          message = `It landed on ${resultFace}. ${win ? 'You win!' : 'You lose.'}`;
+          message = win ? `It landed on ${resultFace}. Won of + 27% of the bet amount!` : `It landed on ${resultFace}. Loss of bet amount`;
         } else if (gameId === 'dice-roll') {
           const actualWinRate = diceChoiceType === 'number' ? winProbability / 3 : winProbability;
           win = random < actualWinRate;
@@ -291,7 +291,7 @@ export function GameView() {
           if (diceChoiceType === 'number') {
             roll = win ? diceNumberChoice : (diceNumberChoice === 1 ? 2 : 1);
             multiplier = win ? baseMult * 2.5 : 0;
-            message = `You rolled a ${roll}. ${win ? 'Exact match! You win!' : 'You lose.'}`;
+            message = win ? `You rolled a ${roll}. Exact match! Won of + 27% of the bet amount!` : `You rolled a ${roll}. Loss of bet amount`;
           } else {
             if (win) {
                roll = diceChoiceType === 'even' ? 2 : 1;
@@ -299,7 +299,7 @@ export function GameView() {
                roll = diceChoiceType === 'even' ? 1 : 2;
             }
             multiplier = win ? baseMult : 0;
-            message = `You rolled a ${roll}. ${win ? 'You win!' : 'You lose.'}`;
+            message = win ? `You rolled a ${roll}. Won of + 27% of the bet amount!` : `You rolled a ${roll}. Loss of bet amount`;
           }
           outcomeValue = roll;
         } else if (gameId === 'lucky-wheel') {
@@ -308,22 +308,22 @@ export function GameView() {
           if (win) {
              const isJackpot = Math.random() < 0.2; 
              multiplier = isJackpot ? baseMult * 2.5 : baseMult;
-             message = isJackpot ? 'JACKPOT!' : 'You won!';
+             message = 'Won of + 27% of the bet amount!';
           } else {
              multiplier = 0;
-             message = 'The wheel stopped on a loss.';
+             message = 'Loss of bet amount';
           }
         } else if (gameId === 'dart-board') { 
           win = random < winProbability;
           const baseMult = limits?.multipliers?.['dart-board'] ?? 1.27;
           multiplier = win ? baseMult : 0;
-          message = win ? 'Bullseye! Great shot.' : 'Miss. Try again.';
+          message = win ? 'Bullseye! Won of + 27% of the bet amount!' : 'Loss of bet amount';
         } else { // bowling
           win = random < winProbability;
           const pins = win ? (Math.random() < 0.2 ? 10 : 8) : 4;
           const baseMult = limits?.multipliers?.['bowling'] ?? 1.27;
           multiplier = win ? (pins === 10 ? baseMult * 1.5 : baseMult * 0.75) : 0;
-          message = `You knocked down ${pins} pins. ${win ? 'Great shot!' : 'Miss.'}`;
+          message = win ? `You knocked down ${pins} pins. Won of + 27% of the bet amount!` : `You knocked down ${pins} pins. Loss of bet amount`;
         }
       }
     }
@@ -480,7 +480,7 @@ export function GameView() {
                 </div>
                 <div className="inline-block px-4 py-1.5 rounded-full bg-neutral-900 border border-neutral-800">
                   <span className={`font-medium ${result.win ? 'text-green-400' : 'text-neutral-400'}`}>
-                    {result.win ? `+${result.amount} INR` : `-${wager} INR`}
+                    {result.win ? `+${result.amount - wager} INR (+27% Profit)` : `-${wager} INR (Loss)`}
                   </span>
                 </div>
               </motion.div>
@@ -710,10 +710,10 @@ export function GameView() {
               <div className="w-16 h-16 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mx-auto mb-4 text-green-400 text-2xl font-bold">
                 🎉
               </div>
-              <h3 className="text-xl font-semibold text-neutral-100 mb-1">You Won!</h3>
-              <p className="text-sm text-neutral-400 mb-4">You won this amount</p>
+              <h3 className="text-xl font-semibold text-neutral-100 mb-1">Won of + 27% of the bet amount!</h3>
+              <p className="text-sm text-neutral-400 mb-4">Total payout credited: {winAmount} INR</p>
               <div className="text-3xl font-bold text-green-400 bg-neutral-950 border border-neutral-800 py-3 rounded-xl">
-                +{winAmount} INR
+                +{winAmount - wager} INR
               </div>
             </div>
           </motion.div>
