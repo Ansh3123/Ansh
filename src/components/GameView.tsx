@@ -12,13 +12,14 @@ export function GameView() {
   const { gameId } = useParams();
   const navigate = useNavigate();
   const { user, profile: storeProfile, updateCredits } = useAuthStore();
-  const profile = storeProfile || (user ? {
+  const profile: any = storeProfile || (user ? {
     uid: user.uid,
     email: user.email || '',
     displayName: user.displayName || user.email?.split('@')[0] || 'User',
     credits: 0,
     isAdmin: user.email === 'saritagupta77300@gmail.com',
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    stats: { totalWins: 0, totalCreditsWon: 0 }
   } : null);
   const [wager, setWager] = useState(1);
   const [playing, setPlaying] = useState(false);

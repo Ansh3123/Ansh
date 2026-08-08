@@ -1,4 +1,4 @@
-import { useEffect, useState, FormEvent, MouseEvent } from 'react';
+import { useEffect, useState, FormEvent, MouseEvent, ChangeEvent } from 'react';
 import { useAuthStore } from '../store/authStore';
 import {
   getUsers,
@@ -11,8 +11,12 @@ import {
   getLiveSessions,
   updateLiveSession,
   getSettings,
-  saveSettings
+  saveSettings,
+  saveUsers,
+  saveRequests
 } from '../lib/storage';
+import { db } from '../lib/firebase';
+import { collection, getDocs, doc, setDoc, updateDoc, onSnapshot, increment } from 'firebase/firestore';
 import { Users, Activity, Settings, Gift, ArrowDownToLine, ArrowUpFromLine, Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
@@ -29,6 +33,7 @@ export function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [grantAmount, setGrantAmount] = useState(10);
   const [selectedUser, setSelectedUser] = useState<string>('');
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'games' | 'live' | 'settings'>('requests');
   const [limits, setLimits] = useState({ 
@@ -62,13 +67,42 @@ export function AdminDashboard() {
   useEffect(() => {
     if (!isAuthenticated) return;
     
-    const loadData = () => {
-      const allUsers = getUsers().map(u => ({ id: u.uid, ...u }));
-      allUsers.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      setUsers(allUsers);
+    const loadData = async () => {
+      const localUsers = getUsers().map(u => ({ id: u.uid || u.email, ...u }));
+      const localReqs = getRequests();
+      
+      let fsUsers: any[] = [];
+      let fsReqs: any[] = [];
+      try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        fsUsers = usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      } catch (e) {}
 
-      const allReqs = getRequests().sort((a, b) => b.timestamp - a.timestamp);
-      setRequests(allReqs);
+      try {
+        const reqsSnap = await getDocs(collection(db, 'payment_requests'));
+        fsReqs = reqsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      } catch (e) {}
+
+      const userMap = new Map();
+      [...localUsers, ...fsUsers].forEach((u: any) => {
+        const key = u.uid || u.email || u.id;
+        if (key) {
+          userMap.set(key, { ...(userMap.get(key) || {}), ...u });
+        }
+      });
+      const mergedUsers = Array.from(userMap.values());
+      mergedUsers.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      setUsers(mergedUsers);
+
+      const reqMap = new Map();
+      [...localReqs, ...fsReqs].forEach((r: any) => {
+        if (r.id) {
+          reqMap.set(r.id, { ...(reqMap.get(r.id) || {}), ...r });
+        }
+      });
+      const mergedReqs = Array.from(reqMap.values());
+      mergedReqs.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+      setRequests(mergedReqs);
 
       const allGames = getGames();
       setGames(allGames);
@@ -89,12 +123,43 @@ export function AdminDashboard() {
     loadData();
     setLoading(false);
 
+    let unsubUsers = () => {};
+    let unsubReqs = () => {};
+    try {
+      unsubUsers = onSnapshot(collection(db, 'users'), (snap) => {
+        const fsU = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const localU = getUsers().map(u => ({ id: u.uid || u.email, ...u }));
+        const map = new Map();
+        [...localU, ...fsU].forEach((u: any) => {
+          const key = u.uid || u.email || u.id;
+          if (key) map.set(key, { ...(map.get(key) || {}), ...u });
+        });
+        const m = Array.from(map.values());
+        m.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        setUsers(m);
+      });
+
+      unsubReqs = onSnapshot(collection(db, 'payment_requests'), (snap) => {
+        const fsR = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const localR = getRequests();
+        const map = new Map();
+        [...localR, ...fsR].forEach((r: any) => {
+          if (r.id) map.set(r.id, { ...(map.get(r.id) || {}), ...r });
+        });
+        const m = Array.from(map.values());
+        m.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        setRequests(m);
+      });
+    } catch (e) {}
+
     window.addEventListener('app_storage_change', loadData);
     window.addEventListener('storage', loadData);
 
     const interval = setInterval(loadData, 2000);
     return () => {
       clearInterval(interval);
+      unsubUsers();
+      unsubReqs();
       window.removeEventListener('app_storage_change', loadData);
       window.removeEventListener('storage', loadData);
     };
@@ -120,22 +185,67 @@ export function AdminDashboard() {
     }
   };
 
-  const handleProcessRequest = (reqId: string, uid: string, rawAmount: any, type: string, action: 'approved' | 'rejected') => {
+  const handleProcessRequest = async (reqId: string, uid: string, rawAmount: any, type: string, action: 'approved' | 'rejected') => {
     try {
       if (!reqId) {
         alert('Request ID is missing.');
         return;
       }
 
-      processPaymentRequest(reqId, action, profile?.email || 'admin');
-      alert(`Request ${action} successfully.`);
+      const amountNum = Number(rawAmount) || 0;
 
-      // Refresh local requests and users
+      try {
+        const reqRef = doc(db, 'payment_requests', reqId);
+        await updateDoc(reqRef, {
+          status: action,
+          processedAt: Date.now(),
+          processedBy: profile?.email || 'admin'
+        });
+
+        if (type === 'recharge' && action === 'approved') {
+          const userRef = doc(db, 'users', uid);
+          await setDoc(userRef, {
+            credits: increment(amountNum),
+            hasBetAfterDeposit: false
+          }, { merge: true });
+        } else if (type === 'withdraw' && action === 'rejected') {
+          const userRef = doc(db, 'users', uid);
+          await setDoc(userRef, {
+            credits: increment(amountNum)
+          }, { merge: true });
+        }
+      } catch (fsErr) {
+        console.warn("Firestore update req error:", fsErr);
+      }
+
+      try {
+        processPaymentRequest(reqId, action, profile?.email || 'admin');
+      } catch (e) {
+        // Fallback local credit update
+        const allUsers = getUsers();
+        const target = allUsers.find(u => u.uid === uid || u.email === uid);
+        if (target) {
+          if (type === 'recharge' && action === 'approved') {
+            target.credits = (target.credits || 0) + amountNum;
+            target.hasBetAfterDeposit = false;
+          } else if (type === 'withdraw' && action === 'rejected') {
+            target.credits = (target.credits || 0) + amountNum;
+          }
+          saveUsers(allUsers);
+        }
+      }
+
+      if (type === 'recharge' && action === 'approved') {
+        alert(`Recharge approved successfully! Added ${amountNum} INR to user's wallet balance.`);
+      } else {
+        alert(`Request ${action} successfully.`);
+      }
+
       setRequests(getRequests().sort((a, b) => b.timestamp - a.timestamp));
-      setUsers(getUsers().map(u => ({ id: u.uid, ...u })));
+      setUsers(getUsers().map(u => ({ id: u.uid || u.email, ...u })));
     } catch (err: any) {
       console.error("Error processing request:", err);
-      // Fallback local update to guarantee wallet approval succeeds
+      // Fallback local update
       try {
         const reqs = getRequests();
         const req = reqs.find(r => r.id === reqId);
@@ -145,7 +255,7 @@ export function AdminDashboard() {
           req.processedBy = profile?.email || 'admin';
           if (type === 'recharge' && action === 'approved') {
             const allUsers = getUsers();
-            const target = allUsers.find(u => u.uid === uid);
+            const target = allUsers.find(u => u.uid === uid || u.email === uid);
             if (target) {
               target.credits = (target.credits || 0) + (Number(rawAmount) || 0);
               target.hasBetAfterDeposit = false;
@@ -154,7 +264,7 @@ export function AdminDashboard() {
           }
           saveRequests(reqs);
           setRequests(getRequests().sort((a, b) => b.timestamp - a.timestamp));
-          setUsers(getUsers().map(u => ({ id: u.uid, ...u })));
+          setUsers(getUsers().map(u => ({ id: u.uid || u.email, ...u })));
           alert(`Request ${action} successfully.`);
           return;
         }
@@ -165,21 +275,52 @@ export function AdminDashboard() {
     }
   };
 
-  const handleGrantCredits = () => {
-    if (!selectedUser || grantAmount === 0) return;
+  const filteredUsers = users.filter(u => 
+    (u.username || u.displayName || u.email || u.id || '').toLowerCase().includes(userSearchQuery.toLowerCase())
+  );
+
+  const handleGrantCredits = async () => {
+    if (selectedUserIds.length === 0 || grantAmount === 0) return;
     try {
-      const target = users.find(u => u.id === selectedUser);
-      if (!target) return;
+      for (const userId of selectedUserIds) {
+        const target = users.find(u => u.id === userId || u.uid === userId || u.email === userId);
+        if (!target) continue;
 
-      const newBal = (target.credits || 0) + grantAmount;
-      updateUser(selectedUser, { credits: newBal });
+        const uidToUse = target.uid || target.id;
+        const newBal = (target.credits || 0) + grantAmount;
 
-      alert(`Successfully credited ${grantAmount} Demo Credits to ${target.displayName || target.email}!\nNew wallet balance: ${newBal} Demo Credits.`);
+        try {
+          await setDoc(doc(db, 'users', uidToUse), {
+            credits: newBal
+          }, { merge: true });
+        } catch (e) {}
+
+        updateUser(uidToUse, { credits: newBal });
+      }
+
+      alert(`Successfully credited ${grantAmount} INR to ${selectedUserIds.length} selected user(s)!`);
       setGrantAmount(10);
-      setUsers(getUsers().map(u => ({ id: u.uid, ...u })));
+      setSelectedUserIds([]);
+      setUsers(getUsers().map(u => ({ id: u.uid || u.email, ...u })));
     } catch (error: any) {
       console.error("Grant credits error:", error);
       alert(`Failed to grant credits: ${error?.message || 'Unknown error'}`);
+    }
+  };
+
+  const handleSelectAll = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedUserIds(filteredUsers.map(u => u.id));
+    } else {
+      setSelectedUserIds([]);
+    }
+  };
+
+  const handleToggleUser = (id: string) => {
+    if (selectedUserIds.includes(id)) {
+      setSelectedUserIds(selectedUserIds.filter(uid => uid !== id));
+    } else {
+      setSelectedUserIds([...selectedUserIds, id]);
     }
   };
 
@@ -386,7 +527,7 @@ export function AdminDashboard() {
                     {req.type === 'recharge' ? <ArrowDownToLine size={16} /> : <ArrowUpFromLine size={16} />}
                   </div>
                   <div>
-                    <div className="font-medium text-sm">{req.displayName || req.email}</div>
+                    <div className="font-medium text-sm">{req.username ? `@${req.username}` : (req.displayName || req.email)}</div>
                     <div className="text-xs text-neutral-400 capitalize">{req.type} • {req.amount} INR</div>
                     {req.utrNumber && <div className="text-xs text-yellow-500 mt-1 font-mono">UTR: {req.utrNumber}</div>}
                   </div>
@@ -503,15 +644,14 @@ export function AdminDashboard() {
             <h2 className="text-lg font-medium mb-4">Manual Balance Grant</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-xs text-neutral-400 mb-1">Select User ({users.length} total)</label>
-                <select value={selectedUser} onChange={(e) => setSelectedUser(e.target.value)} className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2.5 text-neutral-100 text-sm">
-                  <option value="">-- Select a user --</option>
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.displayName || u.email || u.id} ({u.credits ?? 0} INR)
-                    </option>
-                  ))}
-                </select>
+                <label className="block text-xs text-neutral-400 mb-1">Selected Users ({selectedUserIds.length} / {users.length})</label>
+                <div className="text-xs text-neutral-300 bg-neutral-950 border border-neutral-800 rounded-lg p-3 max-h-32 overflow-y-auto">
+                  {selectedUserIds.length === 0 ? (
+                    <span className="text-neutral-500">No users selected. Check users in the table or click Select All.</span>
+                  ) : (
+                    <span>{selectedUserIds.length} user(s) selected for balance credit.</span>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="block text-xs text-neutral-400 mb-1">Amount to Add (INR)</label>
@@ -525,10 +665,10 @@ export function AdminDashboard() {
               </div>
               <button 
                 onClick={handleGrantCredits} 
-                disabled={!selectedUser || grantAmount === 0} 
+                disabled={selectedUserIds.length === 0 || grantAmount === 0} 
                 className="w-full bg-green-600 text-white font-medium rounded-lg px-4 py-2.5 hover:bg-green-500 transition-colors disabled:opacity-50 text-sm"
               >
-                Add Balance to Selected User
+                Add Balance to Selected ({selectedUserIds.length})
               </button>
             </div>
           </div>
@@ -536,6 +676,20 @@ export function AdminDashboard() {
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 md:col-span-2">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-medium">Registered Users ({users.length})</h2>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedUserIds(filteredUsers.map(u => u.id))}
+                  className="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-medium rounded-lg transition-colors"
+                >
+                  Select All Filtered ({filteredUsers.length})
+                </button>
+                <button
+                  onClick={() => setSelectedUserIds([])}
+                  className="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 text-xs font-medium rounded-lg transition-colors"
+                >
+                  Deselect All
+                </button>
+              </div>
             </div>
             <div className="mb-4">
               <input
@@ -550,33 +704,43 @@ export function AdminDashboard() {
               <table className="w-full text-left text-sm">
                 <thead className="text-neutral-400 border-b border-neutral-800 sticky top-0 bg-neutral-900">
                   <tr>
-                    <th className="pb-3 font-medium">User</th>
+                    <th className="pb-3 w-10">
+                      <input 
+                        type="checkbox" 
+                        onChange={handleSelectAll}
+                        checked={filteredUsers.length > 0 && filteredUsers.every(u => selectedUserIds.includes(u.id))}
+                        className="rounded bg-neutral-950 border-neutral-700 text-green-600 focus:ring-0 cursor-pointer"
+                      />
+                    </th>
+                    <th className="pb-3 font-medium">Username</th>
+                    <th className="pb-3 font-medium">Name</th>
                     <th className="pb-3 font-medium">Email</th>
                     <th className="pb-3 font-medium">Credits</th>
-                    <th className="pb-3 font-medium text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-800">
-                  {users.filter(u => 
-                    (u.displayName || u.email || u.id || '').toLowerCase().includes(userSearchQuery.toLowerCase())
-                  ).map(u => (
-                    <tr key={u.id} className={selectedUser === u.id ? "bg-neutral-800/50" : ""}>
-                      <td className="py-3 font-medium">{u.displayName || u.email?.split('@')[0] || u.id}</td>
-                      <td className="py-3 text-neutral-400 text-xs">{u.email || 'N/A'}</td>
-                      <td className="py-3 font-semibold text-green-400">{u.credits ?? 0} INR</td>
-                      <td className="py-3 text-right">
-                        <button
-                          onClick={() => setSelectedUser(u.id)}
-                          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${selectedUser === u.id ? 'bg-green-600 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-200'}`}
-                        >
-                          {selectedUser === u.id ? 'Selected' : 'Select'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {users.length === 0 && (
+                  {filteredUsers.map(u => {
+                    const isSelected = selectedUserIds.includes(u.id);
+                    return (
+                      <tr key={u.id} className={isSelected ? "bg-neutral-800/50 cursor-pointer" : "cursor-pointer"} onClick={() => handleToggleUser(u.id)}>
+                        <td className="py-3" onClick={(e) => e.stopPropagation()}>
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected}
+                            onChange={() => handleToggleUser(u.id)}
+                            className="rounded bg-neutral-950 border-neutral-700 text-green-600 focus:ring-0 cursor-pointer"
+                          />
+                        </td>
+                        <td className="py-3 font-semibold text-neutral-200">@{u.username || 'N/A'}</td>
+                        <td className="py-3 font-medium">{u.displayName || u.email?.split('@')[0] || u.id}</td>
+                        <td className="py-3 text-neutral-400 text-xs">{u.email || 'N/A'}</td>
+                        <td className="py-3 font-semibold text-green-400">{u.credits ?? 0} INR</td>
+                      </tr>
+                    );
+                  })}
+                  {filteredUsers.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="py-6 text-center text-neutral-500">No registered users found.</td>
+                      <td colSpan={5} className="py-6 text-center text-neutral-500">No registered users found.</td>
                     </tr>
                   )}
                 </tbody>

@@ -98,6 +98,7 @@ export function WalletView() {
         uid: user.uid,
         email: displayProfile.email || user.email || '',
         displayName: displayProfile.displayName || user.displayName || user.email?.split('@')[0] || 'User',
+        username: displayProfile.username || displayProfile.displayName || user.displayName || user.email?.split('@')[0] || 'User',
         type: activeTab,
         amount: reqAmount,
         utrNumber: activeTab === 'recharge' ? utrNumber.trim() : null,
@@ -150,14 +151,15 @@ export function WalletView() {
     );
   }
 
-  const displayProfile = profile || {
+  const displayProfile: any = profile || {
     uid: user.uid,
     email: user.email || '',
     displayName: user.displayName || user.email?.split('@')[0] || 'User',
     credits: 0,
     freeCredits: 0,
     isAdmin: false,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    hasBetAfterDeposit: true
   };
 
   return (

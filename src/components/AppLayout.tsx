@@ -13,6 +13,7 @@ import { GameView } from './GameView';
 import { Leaderboard } from './Leaderboard';
 import { WalletView } from './WalletView';
 import { GlobalFeed } from './GlobalFeed';
+import { UsernameModal } from './UsernameModal';
 
 export function AppLayout() {
   const { user, profile } = useAuthStore();
@@ -126,6 +127,7 @@ export function AppLayout() {
           <p>Admin Support: <a href="https://t.me/SaiyanGoku0007" target="_blank" rel="noopener noreferrer" className="text-neutral-400 hover:text-neutral-100 transition-colors">@SaiyanGoku0007</a></p>
         </div>
       </footer>
+      <UsernameModal />
     </div>
   );
 }

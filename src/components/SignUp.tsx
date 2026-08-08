@@ -1,7 +1,7 @@
 import { useState, FormEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { registerUser, syncFirebaseUser } from '../lib/storage';
+import { registerUser, syncFirebaseUser, isUsernameTaken } from '../lib/storage';
 import { auth, googleProvider } from '../lib/firebase';
 import { createUserWithEmailAndPassword, signInWithPopup, updateProfile } from 'firebase/auth';
 import { motion } from 'motion/react';
@@ -10,6 +10,7 @@ export function SignUp() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -27,6 +28,14 @@ export function SignUp() {
     setLoading(true);
 
     try {
+      const cleanUsername = username.trim();
+      if (!cleanUsername) {
+        throw new Error('Username is required.');
+      }
+      if (isUsernameTaken(cleanUsername)) {
+        throw new Error('Username is already taken. Please choose another one.');
+      }
+
       try {
         const userCred = await createUserWithEmailAndPassword(auth, email, password);
         if (displayName && userCred.user) {
@@ -35,14 +44,15 @@ export function SignUp() {
         const newUser = syncFirebaseUser({
           uid: userCred.user.uid,
           email: userCred.user.email,
-          displayName: displayName || userCred.user.displayName
+          displayName: displayName || userCred.user.displayName,
+          username: cleanUsername
         });
         setUser(newUser);
         navigate('/');
         return;
       } catch (fbErr: any) {
         console.warn('Firebase signup attempt:', fbErr?.code || fbErr?.message);
-        const newUser = registerUser(email, password, displayName);
+        const newUser = registerUser(email, password, displayName, cleanUsername);
         setUser(newUser);
         navigate('/');
       }
@@ -122,6 +132,17 @@ export function SignUp() {
         </div>
 
         <form onSubmit={handleSignUp} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-neutral-400 mb-1">Username (Unique)</label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. goku_007"
+              className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2.5 text-neutral-100 focus:outline-none focus:border-neutral-600 transition-colors"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-neutral-400 mb-1">Display Name</label>
             <input

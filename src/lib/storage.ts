@@ -3,6 +3,7 @@ export interface UserAccount {
   email: string;
   password?: string;
   displayName: string;
+  username?: string;
   credits: number;
   freeCredits: number;
   isAdmin: boolean;
@@ -160,11 +161,26 @@ export function setCurrentUser(user: UserAccount | null): void {
   setItem(STORAGE_KEYS.CURRENT_USER, user);
 }
 
-export function registerUser(email: string, pass: string, displayName: string): UserAccount {
+export function isUsernameTaken(username: string, excludeUid?: string): boolean {
+  if (!username) return false;
+  const users = getUsers();
+  const clean = username.trim().toLowerCase();
+  return users.some(u => u.username?.toLowerCase() === clean && u.uid !== excludeUid);
+}
+
+export function registerUser(email: string, pass: string, displayName: string, username: string): UserAccount {
   const users = getUsers();
   const existing = users.find(u => u.email.toLowerCase() === email.toLowerCase());
   if (existing) {
     throw new Error('An account with this email already exists.');
+  }
+
+  const cleanUsername = username?.trim();
+  if (!cleanUsername) {
+    throw new Error('Username is required.');
+  }
+  if (isUsernameTaken(cleanUsername)) {
+    throw new Error('Username is already taken. Please choose another one.');
   }
 
   const isAdmin = email.toLowerCase() === 'saritagupta77300@gmail.com';
@@ -173,6 +189,7 @@ export function registerUser(email: string, pass: string, displayName: string): 
     email,
     password: pass,
     displayName: displayName || email.split('@')[0],
+    username: cleanUsername,
     credits: 100,
     freeCredits: 0,
     isAdmin,
@@ -201,18 +218,20 @@ export function logoutUser(): void {
   setCurrentUser(null);
 }
 
-export function syncFirebaseUser(fbUser: { uid: string; email?: string | null; displayName?: string | null }): UserAccount {
+export function syncFirebaseUser(fbUser: { uid: string; email?: string | null; displayName?: string | null; username?: string | null }): UserAccount {
   const users = getUsers();
   let user = users.find(u => u.uid === fbUser.uid || (fbUser.email && u.email.toLowerCase() === fbUser.email.toLowerCase()));
   const email = fbUser.email || `${fbUser.uid}@firebase.user`;
   const isAdmin = email.toLowerCase() === 'saritagupta77300@gmail.com';
   const displayName = fbUser.displayName || user?.displayName || email.split('@')[0] || 'User';
+  const username = fbUser.username || user?.username || undefined;
 
   if (!user) {
     user = {
       uid: fbUser.uid,
       email,
       displayName,
+      username,
       credits: 100,
       freeCredits: 0,
       isAdmin,
@@ -227,6 +246,7 @@ export function syncFirebaseUser(fbUser: { uid: string; email?: string | null; d
       uid: fbUser.uid,
       email: user.email || email,
       displayName: user.displayName || displayName,
+      username: user.username || username,
       isAdmin: user.isAdmin || isAdmin,
     };
     updateUser(user.uid, user);
@@ -274,19 +294,38 @@ export function processPaymentRequest(reqId: string, action: 'approved' | 'rejec
   req.processedBy = processedBy;
 
   if (req.type === 'recharge' && action === 'approved') {
-    const user = getUserById(req.uid);
+    let user = getUserById(req.uid);
+    if (!user && req.email) {
+      user = getUserById(req.email);
+    }
     if (user) {
-      updateUser(req.uid, {
-        credits: user.credits + req.amount,
+      updateUser(user.uid || req.uid, {
+        credits: (user.credits || 0) + Number(req.amount || 0),
         hasBetAfterDeposit: false,
       });
+    } else {
+      const users = getUsers();
+      const newUser: UserAccount = {
+        uid: req.uid,
+        email: req.email || `${req.uid}@user.com`,
+        displayName: req.displayName || 'User',
+        credits: Number(req.amount || 0),
+        freeCredits: 0,
+        isAdmin: false,
+        createdAt: Date.now(),
+        hasBetAfterDeposit: false,
+      };
+      users.push(newUser);
+      saveUsers(users);
     }
   } else if (req.type === 'withdraw' && action === 'rejected') {
-    // Refund credits
-    const user = getUserById(req.uid);
+    let user = getUserById(req.uid);
+    if (!user && req.email) {
+      user = getUserById(req.email);
+    }
     if (user) {
-      updateUser(req.uid, {
-        credits: user.credits + req.amount,
+      updateUser(user.uid || req.uid, {
+        credits: (user.credits || 0) + Number(req.amount || 0),
       });
     }
   }

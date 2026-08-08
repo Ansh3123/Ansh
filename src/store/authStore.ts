@@ -16,13 +16,14 @@ export interface UserProfile {
     totalWins?: number;
     totalCreditsWon?: number;
   };
+  [key: string]: any;
 }
 
 interface AuthState {
-  user: User | null;
+  user: User | any | null;
   profile: UserProfile | null;
   loading: boolean;
-  setUser: (user: User | null) => void;
+  setUser: (user: User | any | null) => void;
   setProfile: (profile: UserProfile | null) => void;
   setLoading: (loading: boolean) => void;
   updateCredits: (amount: number) => void;
