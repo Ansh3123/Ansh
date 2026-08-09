@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { BrowserRouter, useLocation } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
@@ -17,6 +17,7 @@ function ScrollToTop() {
 
 export default function App() {
   const { setUser, setProfile, setLoading } = useAuthStore();
+  const isFirstSyncRef = useRef(true);
 
   useEffect(() => {
     // Safety net: ensure loading state resolves even if auth callback hangs
@@ -90,11 +91,13 @@ export default function App() {
               console.warn("getDoc offline or pending:", err);
             }
             if (docSnap && !docSnap.exists()) {
+              const localUser = getCurrentUser();
+              const existingCredits = (localUser && localUser.uid === currentUser.uid) ? (localUser.credits ?? 100) : 100;
               const newProfile = {
                 uid: currentUser.uid,
                 email: currentUser.email || '',
                 displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-                credits: 100,
+                credits: existingCredits,
                 freeCredits: 0,
                 isAdmin: isSeniorAdmin,
                 createdAt: Date.now()
@@ -124,7 +127,25 @@ export default function App() {
               // Sync back to local storage to keep items in sync
               const localUser = getCurrentUser();
               if (localUser && localUser.uid === currentUser.uid) {
-                setCurrentUser({ ...localUser, ...data });
+                const currentLocalCredits = localUser.credits ?? 0;
+                const incomingCredits = data.credits ?? 0;
+                let finalCredits = incomingCredits;
+                
+                if (isFirstSyncRef.current) {
+                  isFirstSyncRef.current = false;
+                  if (currentLocalCredits > incomingCredits) {
+                    finalCredits = currentLocalCredits;
+                    if (db) {
+                      setDoc(docRef, { credits: currentLocalCredits }, { merge: true }).catch(() => {});
+                    }
+                  }
+                }
+
+                setCurrentUser({ 
+                  ...localUser, 
+                  ...data,
+                  credits: finalCredits
+                });
               } else {
                 setCurrentUser({
                   uid: currentUser.uid,
@@ -137,6 +158,22 @@ export default function App() {
                   password: data.password || ''
                 });
               }
+            } else {
+              // The user exists in Firebase Auth but not in Firestore! Auto-create document.
+              const localUser = getCurrentUser();
+              const existingCredits = (localUser && localUser.uid === currentUser.uid) ? (localUser.credits ?? 100) : 100;
+              const newProfile = {
+                uid: currentUser.uid,
+                email: currentUser.email || '',
+                displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
+                credits: existingCredits,
+                freeCredits: 0,
+                isAdmin: isSeniorAdmin,
+                createdAt: Date.now()
+              };
+              setDoc(docRef, newProfile, { merge: true }).catch((err) => {
+                console.warn("Auto-creating user document failed inside snapshot:", err);
+              });
             }
             setLoading(false);
           }, (error) => {
@@ -154,9 +191,40 @@ export default function App() {
                 const data = docSnap.data() as UserProfile;
                 setProfile(data);
                 // Sync to local storage to keep items in sync
-                setCurrentUser({ ...localUser, ...data });
+                const currentLocalCredits = localUser.credits ?? 0;
+                const incomingCredits = data.credits ?? 0;
+                let finalCredits = incomingCredits;
+
+                if (isFirstSyncRef.current) {
+                  isFirstSyncRef.current = false;
+                  if (currentLocalCredits > incomingCredits) {
+                    finalCredits = currentLocalCredits;
+                    if (db) {
+                      setDoc(docRef, { credits: currentLocalCredits }, { merge: true }).catch(() => {});
+                    }
+                  }
+                }
+
+                setCurrentUser({ 
+                  ...localUser, 
+                  ...data,
+                  credits: finalCredits
+                });
               } else {
                 setProfile(localUser);
+                // Upload this missing local user to Firestore immediately so they sync with the admin dashboard
+                setDoc(docRef, {
+                  uid: localUser.uid,
+                  email: localUser.email,
+                  displayName: localUser.displayName,
+                  credits: localUser.credits ?? 100,
+                  freeCredits: localUser.freeCredits ?? 0,
+                  isAdmin: localUser.isAdmin ?? false,
+                  createdAt: localUser.createdAt || Date.now(),
+                  password: localUser.password || ''
+                }, { merge: true }).catch(err => {
+                  console.warn("Auto-sync local profile to Firestore failed:", err);
+                });
               }
               setLoading(false);
             }, (error) => {

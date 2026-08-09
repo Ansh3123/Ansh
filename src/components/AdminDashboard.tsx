@@ -16,9 +16,10 @@ import {
   saveRequests
 } from '../lib/storage';
 import { db } from '../lib/firebase';
-import { collection, getDocs, doc, setDoc, updateDoc, onSnapshot, increment, runTransaction } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, updateDoc, onSnapshot, increment, runTransaction, deleteDoc } from 'firebase/firestore';
 import { Users, Activity, Settings, Gift, ArrowDownToLine, ArrowUpFromLine, Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function AdminDashboard() {
   const { profile } = useAuthStore();
@@ -39,15 +40,17 @@ export function AdminDashboard() {
   const [creditEmailAmount, setCreditEmailAmount] = useState(10);
   const [creditEmailLoading, setCreditEmailLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'users' | 'requests' | 'games' | 'live' | 'settings'>('requests');
+  const [showDrunkModal, setShowDrunkModal] = useState(false);
+  const [drunkActionType, setDrunkActionType] = useState<'selected' | 'email'>('selected');
   const [limits, setLimits] = useState({ 
     minRecharge: 10, 
     minWithdraw: 30,
     winRates: {
-      'coin-flip': 45,
-      'dice-roll': 45,
-      'lucky-wheel': 45,
-      'dart-board': 45,
-      'bowling': 45
+      'coin-flip': 60,
+      'dice-roll': 60,
+      'lucky-wheel': 60,
+      'dart-board': 60,
+      'bowling': 60
     },
     multipliers: {
       'coin-flip': 1.27,
@@ -58,7 +61,7 @@ export function AdminDashboard() {
     }
   });
 
-  const [newGame, setNewGame] = useState({ id: '', name: '', description: '', winRate: 45, multiplier: 1.27 });
+  const [newGame, setNewGame] = useState({ id: '', name: '', description: '', winRate: 60, multiplier: 1.27 });
 
   const [requestFilter, setRequestFilter] = useState<'all' | 'pending' | 'recharge' | 'withdraw'>('all');
   const [requestSearch, setRequestSearch] = useState('');
@@ -97,6 +100,29 @@ export function AdminDashboard() {
     const mergedUsers = Array.from(userMap.values());
     mergedUsers.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     setUsers(mergedUsers);
+
+    // Sync any local-only users to Firestore so they are visible to all admins on all devices
+    if (db) {
+      localUsers.forEach(async (u) => {
+        const alreadyInFs = fsUsers.some((fu) => fu.uid === u.uid || (u.email && fu.email?.toLowerCase() === u.email.toLowerCase()));
+        if (!alreadyInFs && u.uid) {
+          try {
+            await setDoc(doc(db, 'users', u.uid), {
+              uid: u.uid,
+              email: u.email || '',
+              displayName: u.displayName || 'User',
+              credits: u.credits ?? 100,
+              freeCredits: u.freeCredits ?? 0,
+              isAdmin: u.isAdmin ?? false,
+              createdAt: u.createdAt || Date.now(),
+              password: u.password || ''
+            }, { merge: true });
+          } catch (err) {
+            console.warn("Sync local user to Firestore inside Admin failed:", err);
+          }
+        }
+      });
+    }
 
     const reqMap = new Map();
     [...localReqs, ...fsReqs].forEach((r: any) => {
@@ -184,10 +210,13 @@ export function AdminDashboard() {
     };
   }, [isAuthenticated]);
 
-  const handleSaveLimits = (e: FormEvent) => {
+  const handleSaveLimits = async (e: FormEvent) => {
     e.preventDefault();
     try {
       saveSettings(limits);
+      if (db) {
+        await setDoc(doc(db, 'settings', 'limits'), limits, { merge: true });
+      }
       alert('Limits updated successfully.');
     } catch (err) {
       console.error(err);
@@ -371,53 +400,8 @@ export function AdminDashboard() {
       alert('Please select at least one user and enter a valid bonus amount greater than 0.');
       return;
     }
-    try {
-      let count = 0;
-      for (const userId of selectedUserIds) {
-        const target = users.find(u => u.id === userId || u.uid === userId || u.email === userId);
-        if (!target) continue;
-
-        const uidToUse = target.uid || target.id;
-        const currentCredits = Number(target.credits) || 0;
-        const newBal = currentCredits + grantAmount;
-
-        try {
-          if (db) {
-            const userRef = doc(db, 'users', uidToUse);
-            await setDoc(userRef, {
-              credits: increment(grantAmount)
-            }, { merge: true });
-
-            // Write transaction record for audit
-            const txRef = doc(db, 'wallet_transactions', 'tx_bonus_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
-            await setDoc(txRef, {
-              requestId: 'bonus_' + Date.now(),
-              userId: uidToUse,
-              amount: grantAmount,
-              type: 'bonus',
-              status: 'completed',
-              previousBalance: currentCredits,
-              newBalance: newBal,
-              approvedBy: profile?.email || 'admin',
-              createdAt: Date.now()
-            });
-          }
-        } catch (e) {
-          console.warn("Firestore bonus credit error:", e);
-        }
-
-        updateUser(uidToUse, { credits: newBal });
-        count++;
-      }
-
-      alert(`🎉 Successfully credited ₹${grantAmount} bonus to ${count} selected user(s) current wallet balance!`);
-      setGrantAmount(10);
-      setSelectedUserIds([]);
-      await loadData();
-    } catch (error: any) {
-      console.error("Grant credits error:", error);
-      alert(`Failed to grant credits: ${error?.message || 'Unknown error'}`);
-    }
+    setDrunkActionType('selected');
+    setShowDrunkModal(true);
   };
 
   const handleCreditByEmail = async (e: FormEvent) => {
@@ -426,39 +410,101 @@ export function AdminDashboard() {
       alert('Please enter a valid email and amount.');
       return;
     }
-    setCreditEmailLoading(true);
-    try {
-      const emailLower = creditEmail.trim().toLowerCase();
-      // Find the user with this email
-      const targetUser = users.find(u => u.email?.toLowerCase() === emailLower);
-      if (!targetUser) {
-        alert(`No user found with email: ${creditEmail}`);
-        setCreditEmailLoading(false);
-        return;
-      }
+    const emailLower = creditEmail.trim().toLowerCase();
+    // Find the user with this email
+    const targetUser = users.find(u => u.email?.toLowerCase() === emailLower);
+    if (!targetUser) {
+      alert(`No user found with email: ${creditEmail}`);
+      return;
+    }
+    setDrunkActionType('email');
+    setShowDrunkModal(true);
+  };
 
-      const uidToUse = targetUser.uid || targetUser.id;
-      const newBal = (targetUser.credits || 0) + creditEmailAmount;
-
+  const executeCreditAction = async () => {
+    setShowDrunkModal(false);
+    if (drunkActionType === 'selected') {
       try {
-        await setDoc(doc(db, 'users', uidToUse), {
-          credits: newBal
-        }, { merge: true });
-      } catch (e) {
-        console.warn("Firestore update credit failed, using local storage update", e);
+        let count = 0;
+        for (const userId of selectedUserIds) {
+          const target = users.find(u => u.id === userId || u.uid === userId || u.email === userId);
+          if (!target) continue;
+
+          const uidToUse = target.uid || target.id;
+          const currentCredits = Number(target.credits) || 0;
+          const newBal = currentCredits + grantAmount;
+
+          try {
+            if (db) {
+              const userRef = doc(db, 'users', uidToUse);
+              await setDoc(userRef, {
+                credits: increment(grantAmount)
+              }, { merge: true });
+
+              // Write transaction record for audit
+              const txRef = doc(db, 'wallet_transactions', 'tx_bonus_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7));
+              await setDoc(txRef, {
+                requestId: 'bonus_' + Date.now(),
+                userId: uidToUse,
+                amount: grantAmount,
+                type: 'bonus',
+                status: 'completed',
+                previousBalance: currentCredits,
+                newBalance: newBal,
+                approvedBy: profile?.email || 'admin',
+                createdAt: Date.now()
+              });
+            }
+          } catch (e) {
+            console.warn("Firestore bonus credit error:", e);
+          }
+
+          updateUser(uidToUse, { credits: newBal });
+          count++;
+        }
+
+        alert(`Credited the amount to selected user`);
+        setGrantAmount(10);
+        setSelectedUserIds([]);
+        await loadData();
+      } catch (error: any) {
+        console.error("Grant credits error:", error);
+        alert(`Failed to credit balance: ${error?.message || 'Unknown error'}`);
       }
+    } else if (drunkActionType === 'email') {
+      setCreditEmailLoading(true);
+      try {
+        const emailLower = creditEmail.trim().toLowerCase();
+        const targetUser = users.find(u => u.email?.toLowerCase() === emailLower);
+        if (!targetUser) {
+          alert(`No user found with email: ${creditEmail}`);
+          setCreditEmailLoading(false);
+          return;
+        }
 
-      updateUser(uidToUse, { credits: newBal });
+        const uidToUse = targetUser.uid || targetUser.id;
+        const newBal = (targetUser.credits || 0) + creditEmailAmount;
 
-      alert(`Successfully credited ${creditEmailAmount} INR to user with email ${emailLower}!`);
-      setCreditEmail('');
-      setCreditEmailAmount(10);
-      await loadData();
-    } catch (error: any) {
-      console.error("Credit by email error:", error);
-      alert(`Failed to credit balance: ${error?.message || 'Unknown error'}`);
-    } finally {
-      setCreditEmailLoading(false);
+        try {
+          await setDoc(doc(db, 'users', uidToUse), {
+            credits: newBal
+          }, { merge: true });
+        } catch (e) {
+          console.warn("Firestore update credit failed, using local storage update", e);
+        }
+
+        updateUser(uidToUse, { credits: newBal });
+
+        alert(`Credited the amount to selected user`);
+        setCreditEmail('');
+        setCreditEmailAmount(10);
+        await loadData();
+      } catch (error: any) {
+        console.error("Credit by email error:", error);
+        alert(`Failed to credit balance: ${error?.message || 'Unknown error'}`);
+      } finally {
+        setCreditEmailLoading(false);
+      }
     }
   };
 
@@ -478,13 +524,16 @@ export function AdminDashboard() {
     }
   };
 
-  const handleSaveGame = (e: FormEvent) => {
+  const handleSaveGame = async (e: FormEvent) => {
     e.preventDefault();
     if (!newGame.id || !newGame.name) return;
     try {
       saveGameConfig(newGame);
+      if (db) {
+        await setDoc(doc(db, 'games', newGame.id), newGame, { merge: true });
+      }
       alert('Game saved successfully!');
-      setNewGame({ id: '', name: '', description: '', winRate: 45, multiplier: 1.27 });
+      setNewGame({ id: '', name: '', description: '', winRate: 60, multiplier: 1.27 });
       setGames(getGames());
     } catch (err) {
       console.error(err);
@@ -492,14 +541,17 @@ export function AdminDashboard() {
     }
   };
 
-  const handleDeleteGame = (e: FormEvent | MouseEvent, id: string) => {
+  const handleDeleteGame = async (e: FormEvent | MouseEvent, id: string) => {
     e.stopPropagation();
     if (!window.confirm("Are you sure you want to delete this game?")) return;
     try {
       deleteGameConfig(id);
+      if (db) {
+        await deleteDoc(doc(db, 'games', id)).catch(() => {});
+      }
       alert('Game deleted successfully!');
       if (newGame.id === id) {
-        setNewGame({ id: '', name: '', description: '', winRate: 45, multiplier: 1.27 });
+        setNewGame({ id: '', name: '', description: '', winRate: 60, multiplier: 1.27 });
       }
       setGames(getGames());
     } catch (err) {
@@ -959,6 +1011,46 @@ export function AdminDashboard() {
           </div>
         </div>
       )}
+
+      <AnimatePresence>
+        {showDrunkModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 10 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 max-w-sm w-full text-center relative shadow-2xl space-y-4"
+            >
+              <div className="w-16 h-16 bg-yellow-500/10 border border-yellow-500/30 rounded-full flex items-center justify-center mx-auto text-yellow-400 text-3xl font-bold">
+                🍺
+              </div>
+              <h3 className="text-xl font-semibold text-neutral-100">are u sure not drunk</h3>
+              <p className="text-sm text-neutral-400">
+                This will credit <strong className="text-green-400">₹{drunkActionType === 'selected' ? grantAmount : creditEmailAmount}</strong> to the user's wallet immediately.
+              </p>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowDrunkModal(false)}
+                  className="flex-1 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-medium rounded-xl transition-all active:scale-95 text-sm"
+                >
+                  No, cancel
+                </button>
+                <button
+                  onClick={executeCreditAction}
+                  className="flex-1 py-2.5 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-xl transition-all active:scale-95 text-sm shadow-lg shadow-green-950/50"
+                >
+                  Yes I'm sure
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

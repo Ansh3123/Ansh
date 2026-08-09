@@ -209,6 +209,8 @@ export function GameView() {
     setPlaying(true);
     setResult(null);
     setLastOutcome(null);
+    setShowWinModal(false);
+    setShowLoseModal(false);
     
     playSound('click');
 
@@ -250,27 +252,8 @@ export function GameView() {
       message = 'Loss of bet amount';
       outcomeValue = gameId === 'coin-flip' ? (coinChoice === 'heads' ? 'tails' : 'heads') : null;
     } else {
-      // Normal logic with anti-loss prediction & 45% default win rate
-      let effectiveWinRate = dbConfig ? dbConfig.winRate : (limits?.winRates?.[gameId as keyof typeof limits.winRates] ?? 45);
-      
-      try {
-        const historySnap = await getDocs(query(collection(db, 'history'), orderBy('timestamp', 'desc'), limit(30)));
-        let houseProfit = 0;
-        historySnap.forEach(doc => {
-          const d = doc.data();
-          houseProfit += ((d.wager || 0) - (d.winnings || 0));
-        });
-        // If house profit is getting low or negative, website predicts loss and forces user loss / reduces win rate to guarantee house is always in profit
-        if (houseProfit < 300) {
-          effectiveWinRate = Math.min(effectiveWinRate, 10);
-        }
-        if (houseProfit <= 0) {
-          effectiveWinRate = 0; // absolute anti-loss protection: website never goes into loss
-        }
-      } catch (err) {
-        // fallback
-      }
-
+      // Normal logic with 60% winning rate as requested
+      let effectiveWinRate = 60;
       const winProbability = effectiveWinRate / 100;
 
       if (dbConfig) {
@@ -295,10 +278,12 @@ export function GameView() {
             multiplier = win ? baseMult * 2.5 : 0;
             message = win ? `You rolled a ${roll}. Exact match! Won of + 27% of the bet amount!` : `You rolled a ${roll}. Loss of bet amount`;
           } else {
-            if (win) {
-               roll = diceChoiceType === 'even' ? 2 : 1;
-            } else {
-               roll = diceChoiceType === 'even' ? 1 : 2;
+            const evens = [2, 4, 6];
+            const odds = [1, 3, 5];
+            if (diceChoiceType === 'even') {
+              roll = win ? evens[Math.floor(Math.random() * evens.length)] : odds[Math.floor(Math.random() * odds.length)];
+            } else { // odd
+              roll = win ? odds[Math.floor(Math.random() * odds.length)] : evens[Math.floor(Math.random() * evens.length)];
             }
             multiplier = win ? baseMult : 0;
             message = win ? `You rolled a ${roll}. Won of + 27% of the bet amount!` : `You rolled a ${roll}. Loss of bet amount`;
@@ -310,21 +295,25 @@ export function GameView() {
           if (win) {
              const isJackpot = Math.random() < 0.2; 
              multiplier = isJackpot ? baseMult * 2.5 : baseMult;
+             outcomeValue = isJackpot ? "JACKPOT" : "WIN";
              message = 'Won of + 27% of the bet amount!';
           } else {
              multiplier = 0;
+             outcomeValue = "LOSE";
              message = 'Loss of bet amount';
           }
         } else if (gameId === 'dart-board') { 
           win = random < winProbability;
           const baseMult = limits?.multipliers?.['dart-board'] ?? 1.27;
           multiplier = win ? baseMult : 0;
+          outcomeValue = win ? "BULLSEYE" : "MISS";
           message = win ? 'Bullseye! Won of + 27% of the bet amount!' : 'Loss of bet amount';
         } else { // bowling
           win = random < winProbability;
           const pins = win ? (Math.random() < 0.2 ? 10 : 8) : 4;
           const baseMult = limits?.multipliers?.['bowling'] ?? 1.27;
           multiplier = win ? (pins === 10 ? baseMult * 1.5 : baseMult * 0.75) : 0;
+          outcomeValue = pins === 10 ? "STRIKE" : `${pins} PINS`;
           message = win ? `You knocked down ${pins} pins. Won of + 27% of the bet amount!` : `You knocked down ${pins} pins. Loss of bet amount`;
         }
       }
@@ -334,41 +323,29 @@ export function GameView() {
     const profit = winnings - wager;
 
     try {
+      // 1. Instantly update local Zustand store
       updateCredits(profit);
 
-      const userRef = doc(db, 'users', user!.uid);
-      await setDoc(userRef, { 
-        credits: increment(profit),
-        hasBetAfterDeposit: true,
-        hasPlacedBet: true,
-        'stats.totalWins': win ? increment(1) : increment(0),
-        'stats.totalCreditsWon': win ? increment(winnings) : increment(0)
-      }, { merge: true });
-
-      // Check achievements locally and write if needed
-      if (win) {
-        const currentWins = (profile.stats?.totalWins || 0) + 1;
-        const currentTotalWon = (profile.stats?.totalCreditsWon || 0) + winnings;
-
-        if (currentWins === 1) {
-          const achRef = doc(db, 'achievements', `${user!.uid}_first_win`);
-          await setDoc(achRef, { uid: user!.uid, id: 'first_win', name: 'First Win', timestamp: serverTimestamp() }, { merge: true });
-        }
-        if (currentTotalWon >= 100 && (profile.stats?.totalCreditsWon || 0) < 100) {
-          const achRef = doc(db, 'achievements', `${user!.uid}_100_credits`);
-          await setDoc(achRef, { uid: user!.uid, id: '100_credits', name: '100 Credits Won', timestamp: serverTimestamp() }, { merge: true });
-        }
+      // 2. Instantly update local storage state (so balance is saved offline and immediately ready)
+      try {
+        const { updateUser: storageUpdateUser } = await import('../lib/storage');
+        const oldStats = profile.stats || { totalWins: 0, totalCreditsWon: 0 };
+        storageUpdateUser(user!.uid, {
+          credits: (profile.credits || 0) + profit,
+          hasBetAfterDeposit: true,
+          hasPlacedBet: true,
+          stats: {
+            totalWins: win ? (oldStats.totalWins || 0) + 1 : (oldStats.totalWins || 0),
+            totalCreditsWon: win ? (oldStats.totalCreditsWon || 0) + winnings : (oldStats.totalCreditsWon || 0)
+          }
+        });
+      } catch (err) {
+        console.warn("Local storage sync error:", err);
       }
 
-      await addDoc(collection(db, 'history'), {
-        uid: user!.uid,
-        displayName: profile.displayName || 'A player',
-        gameId,
-        wager,
-        winnings,
-        profit,
-        timestamp: serverTimestamp()
-      });
+      // 3. Show UI outcome IMMEDIATELY (non-blocking)
+      setLastOutcome(outcomeValue);
+      setResult({ win, amount: winnings, message });
 
       if (win) {
         playSound('win');
@@ -380,24 +357,53 @@ export function GameView() {
         });
         setWinAmount(winnings);
         setShowWinModal(true);
-        if (winTimer) clearTimeout(winTimer);
-        const timer = setTimeout(() => {
-          setShowWinModal(false);
-        }, 2000);
-        setWinTimer(timer);
       } else {
         playSound('lose');
         import('../lib/audio').then(m => m.vibrate([300]));
         setShowLoseModal(true);
-        if (loseTimer) clearTimeout(loseTimer);
-        const timer = setTimeout(() => {
-          setShowLoseModal(false);
-        }, 2000);
-        setLoseTimer(timer);
       }
 
-      setLastOutcome(outcomeValue);
-      setResult({ win, amount: winnings, message });
+      // 4. Asynchronously update Firestore database in the background
+      if (db) {
+        const userRef = doc(db, 'users', user!.uid);
+        setDoc(userRef, { 
+          credits: increment(profit),
+          hasBetAfterDeposit: true,
+          hasPlacedBet: true,
+          'stats.totalWins': win ? increment(1) : increment(0),
+          'stats.totalCreditsWon': win ? increment(winnings) : increment(0)
+        }, { merge: true }).catch(err => {
+          console.warn("Firestore user sync error:", err);
+        });
+
+        // Achievements check
+        if (win) {
+          const currentWins = (profile.stats?.totalWins || 0) + 1;
+          const currentTotalWon = (profile.stats?.totalCreditsWon || 0) + winnings;
+
+          if (currentWins === 1) {
+            const achRef = doc(db, 'achievements', `${user!.uid}_first_win`);
+            setDoc(achRef, { uid: user!.uid, id: 'first_win', name: 'First Win', timestamp: serverTimestamp() }, { merge: true }).catch(() => {});
+          }
+          if (currentTotalWon >= 100 && (profile.stats?.totalCreditsWon || 0) < 100) {
+            const achRef = doc(db, 'achievements', `${user!.uid}_100_credits`);
+            setDoc(achRef, { uid: user!.uid, id: '100_credits', name: '100 Credits Won', timestamp: serverTimestamp() }, { merge: true }).catch(() => {});
+          }
+        }
+
+        // Add to history
+        addDoc(collection(db, 'history'), {
+          uid: user!.uid,
+          displayName: profile.displayName || 'A player',
+          gameId,
+          wager,
+          winnings,
+          profit,
+          timestamp: serverTimestamp()
+        }).catch(err => {
+          console.warn("Firestore history save error:", err);
+        });
+      }
     } catch (error) {
       console.error("Error updating game result:", error);
     } finally {
@@ -484,7 +490,7 @@ export function GameView() {
                   )}
                 </div>
                 <div className={`text-2xl font-bold mb-3 ${result.win ? 'text-green-400' : 'text-red-500'}`}>
-                  {result.win ? 'You won this amount' : 'You lost this amount'}
+                  {result.win ? 'won this amount' : 'lost this amount'}
                 </div>
                 <div className={`inline-block px-5 py-2 rounded-full bg-neutral-950 border ${result.win ? 'border-green-800/60' : 'border-red-800/60'}`}>
                   <span className={`font-bold text-lg ${result.win ? 'text-green-400' : 'text-red-500'}`}>
@@ -718,7 +724,7 @@ export function GameView() {
               <div className="w-16 h-16 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mx-auto mb-4 text-green-400 text-2xl font-bold animate-bounce">
                 🎉
               </div>
-              <h3 className="text-2xl font-bold text-green-400 mb-1">You won this amount</h3>
+              <h3 className="text-2xl font-bold text-green-400 mb-1">won this amount</h3>
               <p className="text-sm text-neutral-400 mb-4">Payout credited to wallet</p>
               <div className="text-3xl font-extrabold text-green-400 bg-neutral-950 border border-green-900/60 py-3 rounded-xl shadow-inner">
                 +{winAmount - wager} INR
@@ -749,7 +755,7 @@ export function GameView() {
               <div className="w-16 h-16 bg-red-500/10 border border-red-500/30 rounded-full flex items-center justify-center mx-auto mb-4 text-red-400 text-2xl font-bold">
                 💸
               </div>
-              <h3 className="text-2xl font-bold text-red-500 mb-1">You lost this amount</h3>
+              <h3 className="text-2xl font-bold text-red-500 mb-1">lost this amount</h3>
               <p className="text-sm text-neutral-400 mb-4">Deducted from wallet</p>
               <div className="text-3xl font-extrabold text-red-500 bg-neutral-950 border border-red-900/60 py-3 rounded-xl shadow-inner">
                 -{wager} INR
