@@ -1,3 +1,6 @@
+import { db } from './firebase';
+import { doc, setDoc } from 'firebase/firestore';
+
 export interface UserAccount {
   uid: string;
   email: string;
@@ -145,6 +148,25 @@ export function updateUser(uid: string, patch: Partial<UserAccount>): UserAccoun
   users[idx] = { ...users[idx], ...patch };
   saveUsers(users);
 
+  // Sync to Firestore immediately so admin dashboard gets instant updates
+  const updatedUser = users[idx];
+  if (db) {
+    setDoc(doc(db, 'users', updatedUser.uid), {
+      uid: updatedUser.uid,
+      email: updatedUser.email,
+      displayName: updatedUser.displayName,
+      username: updatedUser.username || null,
+      credits: updatedUser.credits,
+      freeCredits: updatedUser.freeCredits,
+      isAdmin: updatedUser.isAdmin,
+      createdAt: updatedUser.createdAt,
+      stats: updatedUser.stats || null,
+      password: updatedUser.password || ''
+    }, { merge: true }).catch(err => {
+      console.warn("Firestore sync in updateUser failed:", err);
+    });
+  }
+
   // Update current user if it's the same
   const current = getCurrentUser();
   if (current && (current.uid === uid || current.email?.toLowerCase() === uid.toLowerCase())) {
@@ -197,6 +219,25 @@ export function registerUser(email: string, pass: string, displayName: string, u
   users.push(newUser);
   saveUsers(users);
   setCurrentUser(newUser);
+
+  // Sync registered user to Firestore immediately
+  if (db) {
+    setDoc(doc(db, 'users', newUser.uid), {
+      uid: newUser.uid,
+      email: newUser.email,
+      displayName: newUser.displayName,
+      username: newUser.username || null,
+      credits: newUser.credits,
+      freeCredits: newUser.freeCredits,
+      isAdmin: newUser.isAdmin,
+      createdAt: newUser.createdAt,
+      stats: newUser.stats || null,
+      password: newUser.password || ''
+    }, { merge: true }).catch(err => {
+      console.warn("Firestore sync in registerUser failed:", err);
+    });
+  }
+
   return newUser;
 }
 
@@ -246,7 +287,32 @@ export function syncFirebaseUser(fbUser: { uid: string; email?: string | null; d
       username: user.username || username,
       isAdmin: user.isAdmin || isAdmin,
     };
-    updateUser(user.uid, user);
+    // Update local list directly
+    const idx = users.findIndex(u => u.uid === user!.uid);
+    if (idx !== -1) {
+      users[idx] = user;
+    } else {
+      users.push(user);
+    }
+    saveUsers(users);
+  }
+
+  // Sync to Firestore immediately
+  if (db) {
+    setDoc(doc(db, 'users', user.uid), {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      username: user.username || null,
+      credits: user.credits,
+      freeCredits: user.freeCredits,
+      isAdmin: user.isAdmin,
+      createdAt: user.createdAt,
+      stats: user.stats || null,
+      password: user.password || ''
+    }, { merge: true }).catch(err => {
+      console.warn("Firestore sync in syncFirebaseUser failed:", err);
+    });
   }
 
   setCurrentUser(user);

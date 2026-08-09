@@ -92,14 +92,27 @@ export function AdminDashboard() {
 
     const userMap = new Map();
     [...localUsers, ...fsUsers].forEach((u: any) => {
-      const key = u.uid || u.email || u.id;
+      const key = u.uid || u.id || u.email;
       if (key) {
-        userMap.set(key, { ...(userMap.get(key) || {}), ...u });
+        const existing = userMap.get(key) || {};
+        userMap.set(key, {
+          ...existing,
+          ...u,
+          id: key,
+          uid: u.uid || key
+        });
       }
     });
     const mergedUsers = Array.from(userMap.values());
     mergedUsers.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     setUsers(mergedUsers);
+
+    // Direct write to localStorage to avoid triggering the custom app_storage_change loop
+    try {
+      localStorage.setItem('app_users', JSON.stringify(mergedUsers));
+    } catch (e) {
+      console.warn("Direct localStorage write failed:", e);
+    }
 
     // Sync any local-only users to Firestore so they are visible to all admins on all devices
     if (db) {
@@ -169,12 +182,27 @@ export function AdminDashboard() {
           const localU = getUsers().map(u => ({ id: u.uid || u.email, ...u }));
           const map = new Map();
           [...localU, ...fsU].forEach((u: any) => {
-            const key = u.uid || u.email || u.id;
-            if (key) map.set(key, { ...(map.get(key) || {}), ...u });
+            const key = u.uid || u.id || u.email;
+            if (key) {
+              const existing = map.get(key) || {};
+              map.set(key, {
+                ...existing,
+                ...u,
+                id: key,
+                uid: u.uid || key
+              });
+            }
           });
           const m = Array.from(map.values());
           m.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
           setUsers(m);
+
+          // Direct write to localStorage to avoid triggering the custom app_storage_change loop
+          try {
+            localStorage.setItem('app_users', JSON.stringify(m));
+          } catch (e) {
+            console.warn("Direct localStorage write failed in snapshot:", e);
+          }
         }, (err) => {
           console.warn("Admin users snapshot error:", err);
         });
@@ -200,7 +228,7 @@ export function AdminDashboard() {
     window.addEventListener('app_storage_change', loadData);
     window.addEventListener('storage', loadData);
 
-    const interval = setInterval(loadData, 2000);
+    const interval = setInterval(loadData, 10000);
     return () => {
       clearInterval(interval);
       unsubUsers();
