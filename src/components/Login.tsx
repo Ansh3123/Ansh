@@ -1,9 +1,10 @@
 import { useState, FormEvent, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { loginUser, syncFirebaseUser } from '../lib/storage';
-import { auth, googleProvider } from '../lib/firebase';
+import { loginUser, syncFirebaseUser, getUsers, saveUsers } from '../lib/storage';
+import { auth, googleProvider, db } from '../lib/firebase';
 import { signInWithEmailAndPassword, signInWithPopup, sendPasswordResetEmail } from 'firebase/auth';
+import { collection, query, where, getDocs, doc, setDoc, getDoc } from 'firebase/firestore';
 import { motion } from 'motion/react';
 
 export function Login() {
@@ -36,7 +37,45 @@ export function Login() {
         return;
       } catch (fbErr: any) {
         console.warn('Firebase login attempt:', fbErr?.code || fbErr?.message);
-        // Fallback to local user login if Firebase auth throws user-not-found or similar fallback
+        
+        // Robust check: try to fetch the user from Firestore first to see if they exist online
+        try {
+          const emailLower = email.trim().toLowerCase();
+          const q = query(collection(db, 'users'), where('email', '==', emailLower));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            const fsUserData = snap.docs[0].data();
+            // Verify password if stored on fallback accounts
+            if (fsUserData.password && fsUserData.password !== password) {
+              throw new Error('Invalid password');
+            }
+            
+            // Sync with local storage
+            const localUsers = getUsers();
+            let localU = localUsers.find(u => u.uid === fsUserData.uid || u.email.toLowerCase() === emailLower);
+            if (!localU) {
+              localU = {
+                uid: fsUserData.uid,
+                email: fsUserData.email,
+                displayName: fsUserData.displayName || emailLower.split('@')[0],
+                credits: fsUserData.credits ?? 100,
+                freeCredits: fsUserData.freeCredits ?? 0,
+                isAdmin: fsUserData.isAdmin ?? false,
+                createdAt: fsUserData.createdAt || Date.now(),
+                password: fsUserData.password || password
+              };
+              localUsers.push(localU);
+              saveUsers(localUsers);
+            }
+          }
+        } catch (fsErr: any) {
+          console.warn("Firestore lookup on login fallback failed:", fsErr);
+          if (fsErr?.message === 'Invalid password') {
+            throw fsErr;
+          }
+        }
+
+        // Fallback to local user login
         const loggedUser = loginUser(email, password);
         setUser(loggedUser);
         navigate('/');
@@ -55,6 +94,28 @@ export function Login() {
     setLoading(true);
     try {
       const res = await signInWithPopup(auth, googleProvider);
+
+      // Ensure user profile in Firestore immediately
+      try {
+        const docRef = doc(db, 'users', res.user.uid);
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists()) {
+          const isSeniorAdmin = (res.user.email || '').toLowerCase() === 'saritagupta77300@gmail.com';
+          const newProfile = {
+            uid: res.user.uid,
+            email: res.user.email || '',
+            displayName: res.user.displayName || res.user.email?.split('@')[0] || 'User',
+            credits: 100,
+            freeCredits: 0,
+            isAdmin: isSeniorAdmin,
+            createdAt: Date.now()
+          };
+          await setDoc(docRef, newProfile, { merge: true });
+        }
+      } catch (fbWriteErr) {
+        console.warn("Immediate Firestore write on Google login failed:", fbWriteErr);
+      }
+
       const syncedUser = syncFirebaseUser(res.user);
       setUser(syncedUser);
       navigate('/');

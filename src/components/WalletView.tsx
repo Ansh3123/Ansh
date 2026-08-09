@@ -18,6 +18,7 @@ export function WalletView() {
   // UTR step
   const [awaitingUtr, setAwaitingUtr] = useState(false);
   const [utrNumber, setUtrNumber] = useState('');
+  const [submittedAmount, setSubmittedAmount] = useState<number>(0);
 
   useEffect(() => {
     if (!user) return;
@@ -91,10 +92,12 @@ export function WalletView() {
       }
     }
 
+    const reqAmount = Number(amount);
+    setSubmittedAmount(reqAmount);
     setLoading(true);
     setSubmitted(false);
+
     try {
-      const reqAmount = Number(amount);
       const docId = 'req_' + user.uid + '_' + Date.now();
       const newRequest = {
         uid: user.uid,
@@ -123,27 +126,28 @@ export function WalletView() {
       }
 
       setRequests([{ id: docId, ...newRequest, timestamp: { toDate: () => new Date() } }, ...requests]);
-      
-      playSound('recharge');
-      setSubmitted(true);
-      
-      if (activeTab === 'recharge') {
-        setUtrNumber('');
+
+      // Delay 2 seconds before showing submitted popup modal
+      setTimeout(() => {
+        setLoading(false);
+        playSound('recharge');
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([200, 100, 200]);
+        }
+        setSubmitted(true);
+
+        // Auto close the popup modal after 3 seconds
         setTimeout(() => {
+          setSubmitted(false);
+          setUtrNumber('');
           setAwaitingUtr(false);
-          setSubmitted(false);
-        }, 2000);
-      } else {
-        setTimeout(() => {
-          setSubmitted(false);
-        }, 2000);
-      }
-      
-      setAmount(0);
+          setAmount(0);
+        }, 3000);
+      }, 2000);
+
     } catch (err) {
       console.error(err);
       alert("Error submitting request. Please try again.");
-    } finally {
       setLoading(false);
     }
   };
@@ -399,6 +403,40 @@ export function WalletView() {
           </div>
         </div>
       </div>
+
+      {/* Submitted Pop-up Modal (Appears in 2 secs, Auto-closes in 3 secs) */}
+      <AnimatePresence>
+        {submitted && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ scale: 0.85, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.85, opacity: 0, y: 20 }}
+              className="bg-neutral-900 border border-green-500/40 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl relative"
+            >
+              <div className="w-16 h-16 bg-green-500/20 text-green-400 rounded-full flex items-center justify-center mx-auto text-3xl font-bold">
+                ✓
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white mb-1">Request Submitted!</h3>
+                <p className="text-sm text-neutral-300">
+                  Your <span className="capitalize font-medium text-white">{activeTab}</span> request for <strong className="text-green-400">₹{submittedAmount}</strong> has been received successfully.
+                </p>
+              </div>
+              <div className="pt-2 border-t border-neutral-800/80">
+                <span className="text-xs text-neutral-500 font-mono">
+                  Closing automatically in 3 seconds...
+                </span>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

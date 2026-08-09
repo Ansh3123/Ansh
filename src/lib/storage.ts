@@ -168,7 +168,7 @@ export function isUsernameTaken(username: string, excludeUid?: string): boolean 
   return users.some(u => u.username?.toLowerCase() === clean && u.uid !== excludeUid);
 }
 
-export function registerUser(email: string, pass: string, displayName: string, username: string): UserAccount {
+export function registerUser(email: string, pass: string, displayName: string, username?: string): UserAccount {
   const users = getUsers();
   const existing = users.find(u => u.email.toLowerCase() === email.toLowerCase());
   if (existing) {
@@ -176,10 +176,7 @@ export function registerUser(email: string, pass: string, displayName: string, u
   }
 
   const cleanUsername = username?.trim();
-  if (!cleanUsername) {
-    throw new Error('Username is required.');
-  }
-  if (isUsernameTaken(cleanUsername)) {
+  if (cleanUsername && isUsernameTaken(cleanUsername)) {
     throw new Error('Username is already taken. Please choose another one.');
   }
 
@@ -189,7 +186,7 @@ export function registerUser(email: string, pass: string, displayName: string, u
     email,
     password: pass,
     displayName: displayName || email.split('@')[0],
-    username: cleanUsername,
+    username: cleanUsername || undefined,
     credits: 100,
     freeCredits: 0,
     isAdmin,

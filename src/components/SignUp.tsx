@@ -4,14 +4,13 @@ import { useAuthStore } from '../store/authStore';
 import { registerUser, syncFirebaseUser, isUsernameTaken } from '../lib/storage';
 import { auth, googleProvider, db } from '../lib/firebase';
 import { createUserWithEmailAndPassword, signInWithPopup, updateProfile } from 'firebase/auth';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, getDoc } from 'firebase/firestore';
 import { motion } from 'motion/react';
 
 export function SignUp() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [username, setUsername] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -29,48 +28,59 @@ export function SignUp() {
     setLoading(true);
 
     try {
-      const cleanUsername = username.trim();
-      if (!cleanUsername) {
-        throw new Error('Username is required.');
-      }
-      if (isUsernameTaken(cleanUsername)) {
-        throw new Error('Username is already taken. Please choose another one.');
-      }
-
-      // Check Firestore cross-user database
-      try {
-        const usersSnap = await getDocs(collection(db, 'users'));
-        const takenOnFirestore = usersSnap.docs.some(docSnap => {
-          const data = docSnap.data();
-          return data.username?.toLowerCase() === cleanUsername.toLowerCase();
-        });
-        if (takenOnFirestore) {
-          throw new Error('Username is already taken. Please choose another one.');
-        }
-      } catch (fbErr: any) {
-        console.warn("Firestore query check error on signup:", fbErr);
-        if (fbErr.message?.includes('already taken')) {
-          throw fbErr;
-        }
-      }
-
       try {
         const userCred = await createUserWithEmailAndPassword(auth, email, password);
         if (displayName && userCred.user) {
           await updateProfile(userCred.user, { displayName });
         }
+
+        // Write profile to Firestore immediately
+        try {
+          const docRef = doc(db, 'users', userCred.user.uid);
+          const isSeniorAdmin = (userCred.user.email || '').toLowerCase() === 'saritagupta77300@gmail.com';
+          const newProfile = {
+            uid: userCred.user.uid,
+            email: userCred.user.email || '',
+            displayName: displayName || userCred.user.displayName || userCred.user.email?.split('@')[0] || 'User',
+            credits: 100,
+            freeCredits: 0,
+            isAdmin: isSeniorAdmin,
+            createdAt: Date.now()
+          };
+          await setDoc(docRef, newProfile, { merge: true });
+        } catch (fsWriteErr) {
+          console.warn("Immediate Firestore write on signup failed:", fsWriteErr);
+        }
+
         const newUser = syncFirebaseUser({
           uid: userCred.user.uid,
           email: userCred.user.email,
           displayName: displayName || userCred.user.displayName,
-          username: cleanUsername
         });
         setUser(newUser);
         navigate('/');
         return;
       } catch (fbErr: any) {
         console.warn('Firebase signup attempt:', fbErr?.code || fbErr?.message);
-        const newUser = registerUser(email, password, displayName, cleanUsername);
+        const newUser = registerUser(email, password, displayName);
+        
+        // Try to save fallback user to Firestore as well!
+        try {
+          const docRef = doc(db, 'users', newUser.uid);
+          await setDoc(docRef, {
+            uid: newUser.uid,
+            email: newUser.email,
+            displayName: newUser.displayName,
+            password: password, // Store password so they can log in from other browsers if needed
+            credits: newUser.credits,
+            freeCredits: newUser.freeCredits,
+            isAdmin: newUser.isAdmin,
+            createdAt: newUser.createdAt
+          }, { merge: true });
+        } catch (fsWriteErr) {
+          console.warn("Immediate Firestore write on fallback signup failed:", fsWriteErr);
+        }
+
         setUser(newUser);
         navigate('/');
       }
@@ -87,6 +97,28 @@ export function SignUp() {
     setLoading(true);
     try {
       const res = await signInWithPopup(auth, googleProvider);
+      
+      // Ensure user profile in Firestore immediately
+      try {
+        const docRef = doc(db, 'users', res.user.uid);
+        const docSnap = await getDoc(docRef);
+        if (!docSnap.exists()) {
+          const isSeniorAdmin = (res.user.email || '').toLowerCase() === 'saritagupta77300@gmail.com';
+          const newProfile = {
+            uid: res.user.uid,
+            email: res.user.email || '',
+            displayName: res.user.displayName || res.user.email?.split('@')[0] || 'User',
+            credits: 100,
+            freeCredits: 0,
+            isAdmin: isSeniorAdmin,
+            createdAt: Date.now()
+          };
+          await setDoc(docRef, newProfile, { merge: true });
+        }
+      } catch (fbWriteErr) {
+        console.warn("Immediate Firestore write on Google signup failed:", fbWriteErr);
+      }
+
       const syncedUser = syncFirebaseUser(res.user);
       setUser(syncedUser);
       navigate('/');
@@ -150,17 +182,6 @@ export function SignUp() {
         </div>
 
         <form onSubmit={handleSignUp} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-neutral-400 mb-1">Username (Unique)</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. goku_007"
-              className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-2.5 text-neutral-100 focus:outline-none focus:border-neutral-600 transition-colors"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-          </div>
           <div>
             <label className="block text-sm font-medium text-neutral-400 mb-1">Display Name</label>
             <input

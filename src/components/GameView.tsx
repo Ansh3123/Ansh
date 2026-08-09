@@ -27,6 +27,8 @@ export function GameView() {
   const [showWinModal, setShowWinModal] = useState(false);
   const [winAmount, setWinAmount] = useState(0);
   const [winTimer, setWinTimer] = useState<any>(null);
+  const [showLoseModal, setShowLoseModal] = useState(false);
+  const [loseTimer, setLoseTimer] = useState<any>(null);
   const [showRechargeModal, setShowRechargeModal] = useState(false);
   const [rechargeTimer, setRechargeTimer] = useState<any>(null);
   
@@ -386,6 +388,12 @@ export function GameView() {
       } else {
         playSound('lose');
         import('../lib/audio').then(m => m.vibrate([300]));
+        setShowLoseModal(true);
+        if (loseTimer) clearTimeout(loseTimer);
+        const timer = setTimeout(() => {
+          setShowLoseModal(false);
+        }, 2000);
+        setLoseTimer(timer);
       }
 
       setLastOutcome(outcomeValue);
@@ -475,12 +483,12 @@ export function GameView() {
                     <GameIcon size={40} className={result.win ? "text-green-500" : "text-neutral-500"} />
                   )}
                 </div>
-                <div className={`text-2xl font-semibold mb-3 ${result.win ? 'text-green-400' : 'text-neutral-300'}`}>
-                  {result.message}
+                <div className={`text-2xl font-bold mb-3 ${result.win ? 'text-green-400' : 'text-red-500'}`}>
+                  {result.win ? 'You won this amount' : 'You lost this amount'}
                 </div>
-                <div className="inline-block px-4 py-1.5 rounded-full bg-neutral-900 border border-neutral-800">
-                  <span className={`font-medium ${result.win ? 'text-green-400' : 'text-neutral-400'}`}>
-                    {result.win ? `+${result.amount - wager} INR (+27% Profit)` : `-${wager} INR (Loss)`}
+                <div className={`inline-block px-5 py-2 rounded-full bg-neutral-950 border ${result.win ? 'border-green-800/60' : 'border-red-800/60'}`}>
+                  <span className={`font-bold text-lg ${result.win ? 'text-green-400' : 'text-red-500'}`}>
+                    {result.win ? `+${result.amount - wager} INR` : `-${wager} INR`}
                   </span>
                 </div>
               </motion.div>
@@ -697,7 +705,7 @@ export function GameView() {
             exit={{ opacity: 0, scale: 0.8, y: -20 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
           >
-            <div className="bg-neutral-900 border border-neutral-700 rounded-2xl p-6 max-w-sm w-full text-center relative shadow-2xl">
+            <div className="bg-neutral-900 border border-green-500 rounded-2xl p-6 max-w-sm w-full text-center relative shadow-2xl">
               <button 
                 onClick={() => {
                   setShowWinModal(false);
@@ -707,13 +715,44 @@ export function GameView() {
               >
                 <X size={18} />
               </button>
-              <div className="w-16 h-16 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mx-auto mb-4 text-green-400 text-2xl font-bold">
+              <div className="w-16 h-16 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mx-auto mb-4 text-green-400 text-2xl font-bold animate-bounce">
                 🎉
               </div>
-              <h3 className="text-xl font-semibold text-neutral-100 mb-1">Won of + 27% of the bet amount!</h3>
-              <p className="text-sm text-neutral-400 mb-4">Total payout credited: {winAmount} INR</p>
-              <div className="text-3xl font-bold text-green-400 bg-neutral-950 border border-neutral-800 py-3 rounded-xl">
+              <h3 className="text-2xl font-bold text-green-400 mb-1">You won this amount</h3>
+              <p className="text-sm text-neutral-400 mb-4">Payout credited to wallet</p>
+              <div className="text-3xl font-extrabold text-green-400 bg-neutral-950 border border-green-900/60 py-3 rounded-xl shadow-inner">
                 +{winAmount - wager} INR
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showLoseModal && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: -20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: -20 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+            <div className="bg-neutral-900 border border-red-500 rounded-2xl p-6 max-w-sm w-full text-center relative shadow-2xl">
+              <button 
+                onClick={() => {
+                  setShowLoseModal(false);
+                  if (loseTimer) clearTimeout(loseTimer);
+                }}
+                className="absolute top-4 right-4 p-1.5 rounded-full bg-neutral-800 text-neutral-400 hover:text-neutral-100 hover:bg-neutral-700 transition-colors"
+              >
+                <X size={18} />
+              </button>
+              <div className="w-16 h-16 bg-red-500/10 border border-red-500/30 rounded-full flex items-center justify-center mx-auto mb-4 text-red-400 text-2xl font-bold">
+                💸
+              </div>
+              <h3 className="text-2xl font-bold text-red-500 mb-1">You lost this amount</h3>
+              <p className="text-sm text-neutral-400 mb-4">Deducted from wallet</p>
+              <div className="text-3xl font-extrabold text-red-500 bg-neutral-950 border border-red-900/60 py-3 rounded-xl shadow-inner">
+                -{wager} INR
               </div>
             </div>
           </motion.div>
