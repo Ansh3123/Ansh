@@ -82,26 +82,26 @@ const DEFAULT_SETTINGS: PlatformSettings = {
   minRecharge: 10,
   minWithdraw: 30,
   winRates: {
-    'coin-flip': 45,
-    'dice-roll': 45,
-    'lucky-wheel': 45,
-    'dart-board': 45,
-    'bowling': 45,
+    'coin-flip': 30,
+    'dice-roll': 30,
+    'lucky-wheel': 30,
+    'dart-board': 30,
+    'bowling': 30,
   },
   multipliers: {
-    'coin-flip': 1.27,
-    'dice-roll': 1.27,
-    'lucky-wheel': 1.27,
-    'dart-board': 1.27,
-    'bowling': 1.27,
+    'coin-flip': 1.8,
+    'dice-roll': 1.8,
+    'lucky-wheel': 1.8,
+    'dart-board': 1.8,
+    'bowling': 1.8,
   },
 };
 
 const DEFAULT_GAMES: GameConfig[] = [
-  { id: 'dice-roll', name: 'Dice Roll', description: 'Roll the dice and win.', winRate: 45, multiplier: 1.27 },
-  { id: 'dart-board', name: 'Dart Board', description: 'Hit the bullseye.', winRate: 45, multiplier: 1.27 },
-  { id: 'coin-flip', name: 'Coin Flip', description: 'Heads or Tails?', winRate: 45, multiplier: 1.27 },
-  { id: 'lucky-wheel', name: 'Lucky Wheel', description: 'Spin to win big.', winRate: 45, multiplier: 1.27 },
+  { id: 'dice-roll', name: 'Dice Roll', description: 'Roll the dice and win.', winRate: 30, multiplier: 1.8 },
+  { id: 'dart-board', name: 'Dart Board', description: 'Hit the bullseye.', winRate: 30, multiplier: 1.8 },
+  { id: 'coin-flip', name: 'Coin Flip', description: 'Heads or Tails?', winRate: 30, multiplier: 1.8 },
+  { id: 'lucky-wheel', name: 'Lucky Wheel', description: 'Spin to win big.', winRate: 30, multiplier: 1.8 },
 ];
 
 function getItem<T>(key: string, defaultValue: T): T {
@@ -209,7 +209,7 @@ export function registerUser(email: string, pass: string, displayName: string, u
     password: pass,
     displayName: displayName || email.split('@')[0],
     username: cleanUsername || undefined,
-    credits: 100,
+    credits: 0,
     freeCredits: 0,
     isAdmin,
     createdAt: Date.now(),
@@ -270,7 +270,7 @@ export function syncFirebaseUser(fbUser: { uid: string; email?: string | null; d
       email,
       displayName,
       username,
-      credits: 100,
+      credits: 0,
       freeCredits: 0,
       isAdmin,
       createdAt: Date.now(),
@@ -346,11 +346,26 @@ export function addRequest(req: Omit<PaymentRequest, 'id' | 'timestamp' | 'statu
 export const addPaymentRequest = addRequest;
 
 
-export function processPaymentRequest(reqId: string, action: 'approved' | 'rejected', processedBy = 'admin'): PaymentRequest {
+export function processPaymentRequest(reqId: string, action: 'approved' | 'rejected', processedBy = 'admin', fallbackReq?: Partial<PaymentRequest>): PaymentRequest {
   const reqs = getRequests();
-  const req = reqs.find(r => r.id === reqId);
-  if (!req) throw new Error('Request not found');
-  if (req.status !== 'pending') throw new Error('Request already processed');
+  let req = reqs.find(r => r.id === reqId);
+  if (!req) {
+    req = {
+      id: reqId,
+      uid: fallbackReq?.uid || 'user_unknown',
+      email: fallbackReq?.email || '',
+      displayName: fallbackReq?.displayName || 'User',
+      type: (fallbackReq?.type as any) || 'recharge',
+      amount: Number(fallbackReq?.amount || 0),
+      status: 'pending',
+      timestamp: fallbackReq?.timestamp || Date.now()
+    };
+    reqs.unshift(req);
+  }
+  if (req.status !== 'pending' && req.status === action) {
+    // Already processed with same action, return it
+    return req;
+  }
 
   req.status = action;
   req.processedAt = Date.now();
@@ -363,7 +378,7 @@ export function processPaymentRequest(reqId: string, action: 'approved' | 'rejec
     }
     if (user) {
       updateUser(user.uid || req.uid, {
-        credits: (user.credits || 0) + Number(req.amount || 0),
+        credits: (Number(user.credits) || 0) + Number(req.amount || 0),
         hasBetAfterDeposit: false,
       });
     } else {
@@ -388,7 +403,7 @@ export function processPaymentRequest(reqId: string, action: 'approved' | 'rejec
     }
     if (user) {
       updateUser(user.uid || req.uid, {
-        credits: (user.credits || 0) + Number(req.amount || 0),
+        credits: (Number(user.credits) || 0) + Number(req.amount || 0),
       });
     }
   }

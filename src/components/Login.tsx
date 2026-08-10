@@ -58,7 +58,7 @@ export function Login() {
                 uid: fsUserData.uid,
                 email: fsUserData.email,
                 displayName: fsUserData.displayName || emailLower.split('@')[0],
-                credits: fsUserData.credits ?? 100,
+                credits: fsUserData.credits ?? 0,
                 freeCredits: fsUserData.freeCredits ?? 0,
                 isAdmin: fsUserData.isAdmin ?? false,
                 createdAt: fsUserData.createdAt || Date.now(),
@@ -105,7 +105,7 @@ export function Login() {
             uid: res.user.uid,
             email: res.user.email || '',
             displayName: res.user.displayName || res.user.email?.split('@')[0] || 'User',
-            credits: 100,
+            credits: 0,
             freeCredits: 0,
             isAdmin: isSeniorAdmin,
             createdAt: Date.now()

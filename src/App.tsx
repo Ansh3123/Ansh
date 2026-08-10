@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { BrowserRouter, useLocation } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, increment, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, increment, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { auth, db, isConfigured } from './lib/firebase';
 import { useAuthStore, UserProfile } from './store/authStore';
 import { AppLayout } from './components/AppLayout';
@@ -80,31 +80,96 @@ export default function App() {
         
         if (currentUser) {
           setUser(currentUser);
-          const isSeniorAdmin = currentUser.email === 'saritagupta77300@gmail.com';
+          const isSeniorAdmin = (currentUser.email || '').toLowerCase() === 'saritagupta77300@gmail.com';
           const docRef = doc(db, 'users', currentUser.uid);
           
           try {
+            const emailLower = (currentUser.email || '').trim().toLowerCase();
+            let preCreditedCredits = 0;
+            let preCreditedFree = 0;
+            let foundPreCredited = false;
+            let oldDocIdToDelete = '';
+
+            if (emailLower) {
+              try {
+                const emailDocRef = doc(db, 'users', emailLower);
+                const emailDocSnap = await getDoc(emailDocRef);
+                if (emailDocSnap.exists()) {
+                  const emailData = emailDocSnap.data();
+                  preCreditedCredits = Number(emailData?.credits) || 0;
+                  preCreditedFree = Number(emailData?.freeCredits) || 0;
+                  foundPreCredited = true;
+                  oldDocIdToDelete = emailLower;
+                  console.log("[PRE-CREDIT] Found pre-credited document by email doc ID:", emailLower, "credits:", preCreditedCredits);
+                } else {
+                  // fallback query matching email
+                  const usersSnap = await getDocs(collection(db, 'users'));
+                  const match = usersSnap.docs.find(d => {
+                    const dData = d.data();
+                    return d.id !== currentUser.uid && (dData?.email || '').trim().toLowerCase() === emailLower;
+                  });
+                  if (match) {
+                    const matchData = match.data();
+                    preCreditedCredits = Number(matchData?.credits) || 0;
+                    preCreditedFree = Number(matchData?.freeCredits) || 0;
+                    foundPreCredited = true;
+                    oldDocIdToDelete = match.id;
+                    console.log("[PRE-CREDIT] Found pre-credited document by email search:", emailLower, "credits:", preCreditedCredits);
+                  }
+                }
+              } catch (err) {
+                console.warn("Pre-credit lookup failed on login:", err);
+              }
+            }
+
             let docSnap = null;
             try {
               docSnap = await getDoc(docRef);
             } catch (err) {
               console.warn("getDoc offline or pending:", err);
             }
+
             if (docSnap && !docSnap.exists()) {
               const localUser = getCurrentUser();
-              const existingCredits = (localUser && localUser.uid === currentUser.uid) ? (localUser.credits ?? 100) : 100;
+              const existingCredits = (localUser && localUser.uid === currentUser.uid) ? (localUser.credits ?? 0) : 0;
+              
+              const finalCredits = foundPreCredited ? (preCreditedCredits || existingCredits) : existingCredits;
+              const finalFreeCredits = foundPreCredited ? preCreditedFree : 0;
+
               const newProfile = {
                 uid: currentUser.uid,
                 email: currentUser.email || '',
                 displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-                credits: existingCredits,
-                freeCredits: 0,
+                credits: finalCredits,
+                freeCredits: finalFreeCredits,
                 isAdmin: isSeniorAdmin,
                 createdAt: Date.now()
               };
               await setDoc(docRef, newProfile, { merge: true }).catch(() => {});
-            } else if (docSnap && isSeniorAdmin && !docSnap.data()?.isAdmin) {
-              await updateDoc(docRef, { isAdmin: true }).catch(() => {});
+
+              if (oldDocIdToDelete && db) {
+                await deleteDoc(doc(db, 'users', oldDocIdToDelete)).catch(() => {});
+              }
+            } else if (docSnap && docSnap.exists()) {
+              if (foundPreCredited && preCreditedCredits > 0) {
+                const existingData = docSnap.data();
+                const updatedCredits = (Number(existingData?.credits) || 0) + preCreditedCredits;
+                const updatedFreeCredits = (Number(existingData?.freeCredits) || 0) + preCreditedFree;
+                
+                await updateDoc(docRef, {
+                  credits: updatedCredits,
+                  freeCredits: updatedFreeCredits
+                }).catch(() => {});
+
+                if (oldDocIdToDelete && db) {
+                  await deleteDoc(doc(db, 'users', oldDocIdToDelete)).catch(() => {});
+                }
+                console.log("[PRE-CREDIT] Merged pre-credited balance to existing user profile! Credits is now:", updatedCredits);
+              }
+
+              if (isSeniorAdmin && !docSnap.data()?.isAdmin) {
+                await updateDoc(docRef, { isAdmin: true }).catch(() => {});
+              }
             }
           } catch (e) {
             console.warn("Auth state doc check error:", e);
@@ -113,15 +178,6 @@ export default function App() {
           unsubProfile = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
               let data = docSnap.data() as UserProfile;
-              // Check daily reward
-              const now = Date.now();
-              const oneDay = 24 * 60 * 60 * 1000;
-              if (!data.lastDailyReward || (now - data.lastDailyReward) > oneDay) {
-                updateDoc(docRef, {
-                  credits: increment(5),
-                  lastDailyReward: now
-                }).catch(() => {});
-              }
               setProfile(data);
               
               // Sync back to local storage to keep items in sync
@@ -151,7 +207,7 @@ export default function App() {
                   uid: currentUser.uid,
                   email: currentUser.email || '',
                   displayName: data.displayName || currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-                  credits: data.credits ?? 100,
+                  credits: data.credits ?? 0,
                   freeCredits: data.freeCredits ?? 0,
                   isAdmin: isSeniorAdmin,
                   createdAt: data.createdAt || Date.now(),
@@ -160,20 +216,67 @@ export default function App() {
               }
             } else {
               // The user exists in Firebase Auth but not in Firestore! Auto-create document.
-              const localUser = getCurrentUser();
-              const existingCredits = (localUser && localUser.uid === currentUser.uid) ? (localUser.credits ?? 100) : 100;
-              const newProfile = {
-                uid: currentUser.uid,
-                email: currentUser.email || '',
-                displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
-                credits: existingCredits,
-                freeCredits: 0,
-                isAdmin: isSeniorAdmin,
-                createdAt: Date.now()
+              const emailLower = (currentUser.email || '').trim().toLowerCase();
+              let preCreditedCredits = 0;
+              let preCreditedFree = 0;
+              let foundPreCredited = false;
+              let oldDocIdToDelete = '';
+
+              const getAndMergePrecredited = async () => {
+                if (emailLower) {
+                  try {
+                    const emailDocRef = doc(db, 'users', emailLower);
+                    const emailDocSnap = await getDoc(emailDocRef);
+                    if (emailDocSnap.exists()) {
+                      const emailData = emailDocSnap.data();
+                      preCreditedCredits = Number(emailData?.credits) || 0;
+                      preCreditedFree = Number(emailData?.freeCredits) || 0;
+                      foundPreCredited = true;
+                      oldDocIdToDelete = emailLower;
+                    } else {
+                      const usersSnap = await getDocs(collection(db, 'users'));
+                      const match = usersSnap.docs.find(d => {
+                        const dData = d.data();
+                        return d.id !== currentUser.uid && (dData?.email || '').trim().toLowerCase() === emailLower;
+                      });
+                      if (match) {
+                        const matchData = match.data();
+                        preCreditedCredits = Number(matchData?.credits) || 0;
+                        preCreditedFree = Number(matchData?.freeCredits) || 0;
+                        foundPreCredited = true;
+                        oldDocIdToDelete = match.id;
+                      }
+                    }
+                  } catch (err) {
+                    console.warn("Pre-credit lookup failed inside snapshot:", err);
+                  }
+                }
+
+                const localUser = getCurrentUser();
+                const existingCredits = (localUser && localUser.uid === currentUser.uid) ? (localUser.credits ?? 0) : 0;
+                
+                const finalCredits = foundPreCredited ? (preCreditedCredits || existingCredits) : existingCredits;
+                const finalFreeCredits = foundPreCredited ? preCreditedFree : 0;
+
+                const newProfile = {
+                  uid: currentUser.uid,
+                  email: currentUser.email || '',
+                  displayName: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
+                  credits: finalCredits,
+                  freeCredits: finalFreeCredits,
+                  isAdmin: isSeniorAdmin,
+                  createdAt: Date.now()
+                };
+
+                await setDoc(docRef, newProfile, { merge: true }).catch((err) => {
+                  console.warn("Auto-creating user document failed inside snapshot:", err);
+                });
+
+                if (oldDocIdToDelete && db) {
+                  await deleteDoc(doc(db, 'users', oldDocIdToDelete)).catch(() => {});
+                }
               };
-              setDoc(docRef, newProfile, { merge: true }).catch((err) => {
-                console.warn("Auto-creating user document failed inside snapshot:", err);
-              });
+              getAndMergePrecredited();
             }
             setLoading(false);
           }, (error) => {
@@ -217,7 +320,7 @@ export default function App() {
                   uid: localUser.uid,
                   email: localUser.email,
                   displayName: localUser.displayName,
-                  credits: localUser.credits ?? 100,
+                  credits: localUser.credits ?? 0,
                   freeCredits: localUser.freeCredits ?? 0,
                   isAdmin: localUser.isAdmin ?? false,
                   createdAt: localUser.createdAt || Date.now(),

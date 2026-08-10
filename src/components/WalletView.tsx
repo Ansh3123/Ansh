@@ -189,7 +189,7 @@ export function WalletView() {
               </div>
               <div>
                 <div className="text-sm text-neutral-400">Current Balance</div>
-                <div className="text-3xl font-semibold text-green-400">{displayProfile.credits} INR</div>
+                <div className="text-3xl font-semibold text-green-400">{typeof displayProfile.credits === 'number' ? Number(displayProfile.credits.toFixed(2)) : 0} INR</div>
               </div>
             </div>
             

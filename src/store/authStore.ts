@@ -37,6 +37,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   setProfile: (profile) => set({ profile }),
   setLoading: (loading) => set({ loading }),
   updateCredits: (amount) => set((state) => ({
-    profile: state.profile ? { ...state.profile, credits: state.profile.credits + amount } : null
+    profile: state.profile ? { ...state.profile, credits: Number(((state.profile.credits || 0) + amount).toFixed(2)) } : null
   })),
 }));

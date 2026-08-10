@@ -6,7 +6,7 @@ export const users = pgTable('users', {
   uid: text('uid').notNull().unique(),
   email: text('email').notNull(),
   displayName: text('display_name'),
-  credits: numeric('credits', { precision: 10, scale: 2 }).default('100.00'),
+  credits: numeric('credits', { precision: 10, scale: 2 }).default('0.00'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

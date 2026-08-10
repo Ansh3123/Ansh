@@ -4,7 +4,7 @@ import { useAuthStore } from '../store/authStore';
 import { registerUser, syncFirebaseUser, isUsernameTaken } from '../lib/storage';
 import { auth, googleProvider, db } from '../lib/firebase';
 import { createUserWithEmailAndPassword, signInWithPopup, updateProfile } from 'firebase/auth';
-import { collection, getDocs, doc, setDoc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { motion } from 'motion/react';
 
 export function SignUp() {
@@ -36,18 +36,58 @@ export function SignUp() {
 
         // Write profile to Firestore immediately
         try {
+          const emailLower = (userCred.user.email || '').trim().toLowerCase();
           const docRef = doc(db, 'users', userCred.user.uid);
           const isSeniorAdmin = (userCred.user.email || '').toLowerCase() === 'saritagupta77300@gmail.com';
+          
+          let preCreditedCredits = 0;
+          let preCreditedFree = 0;
+          let foundPreCredited = false;
+          let oldDocIdToDelete = '';
+
+          if (emailLower) {
+            try {
+              const emailDocRef = doc(db, 'users', emailLower);
+              const emailDocSnap = await getDoc(emailDocRef);
+              if (emailDocSnap.exists()) {
+                const emailData = emailDocSnap.data();
+                preCreditedCredits = Number(emailData?.credits) ?? 0;
+                preCreditedFree = Number(emailData?.freeCredits) ?? 0;
+                foundPreCredited = true;
+                oldDocIdToDelete = emailLower;
+              } else {
+                const usersSnap = await getDocs(collection(db, 'users'));
+                const match = usersSnap.docs.find(d => {
+                  const dData = d.data();
+                  return d.id !== userCred.user.uid && (dData?.email || '').trim().toLowerCase() === emailLower;
+                });
+                if (match) {
+                  const matchData = match.data();
+                  preCreditedCredits = Number(matchData?.credits) ?? 0;
+                  preCreditedFree = Number(matchData?.freeCredits) ?? 0;
+                  foundPreCredited = true;
+                  oldDocIdToDelete = match.id;
+                }
+              }
+            } catch (err) {
+              console.warn("Pre-credit lookup failed during signup:", err);
+            }
+          }
+
           const newProfile = {
             uid: userCred.user.uid,
             email: userCred.user.email || '',
             displayName: displayName || userCred.user.displayName || userCred.user.email?.split('@')[0] || 'User',
-            credits: 100,
-            freeCredits: 0,
+            credits: preCreditedCredits,
+            freeCredits: preCreditedFree,
             isAdmin: isSeniorAdmin,
             createdAt: Date.now()
           };
           await setDoc(docRef, newProfile, { merge: true });
+
+          if (oldDocIdToDelete) {
+            await deleteDoc(doc(db, 'users', oldDocIdToDelete)).catch(() => {});
+          }
         } catch (fsWriteErr) {
           console.warn("Immediate Firestore write on signup failed:", fsWriteErr);
         }
@@ -108,7 +148,7 @@ export function SignUp() {
             uid: res.user.uid,
             email: res.user.email || '',
             displayName: res.user.displayName || res.user.email?.split('@')[0] || 'User',
-            credits: 100,
+            credits: 0,
             freeCredits: 0,
             isAdmin: isSeniorAdmin,
             createdAt: Date.now()

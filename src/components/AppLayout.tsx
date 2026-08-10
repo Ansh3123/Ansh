@@ -1,9 +1,10 @@
 import { useState, useRef, MouseEvent, useEffect } from 'react';
 import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { auth } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
-import { Wallet, LogOut, User as UserIcon, ArrowLeft } from 'lucide-react';
+import { getDocs, collection } from 'firebase/firestore';
+import { Wallet, LogOut, User as UserIcon, ArrowLeft, X, Shield, Users } from 'lucide-react';
 import { Home } from './Home';
 import { Login } from './Login';
 import { SignUp } from './SignUp';
@@ -22,16 +23,49 @@ export function AppLayout() {
   const [clickCount, setClickCount] = useState(0);
   const clickTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  const [backClickCount, setBackClickCount] = useState(0);
+  const backTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [showFirebaseUsersModal, setShowFirebaseUsersModal] = useState(false);
+  const [firebaseUsersList, setFirebaseUsersList] = useState<any[]>([]);
+  const [loadingFirebaseUsers, setLoadingFirebaseUsers] = useState(false);
+
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [location.pathname]);
 
-  const handleBack = () => {
-    if (window.history.length > 1 && location.pathname !== '/') {
-      navigate(-1);
-    } else {
+  const handleBack = async () => {
+    const newCount = backClickCount + 1;
+    setBackClickCount(newCount);
+
+    if (backTimeoutRef.current) clearTimeout(backTimeoutRef.current);
+
+    if (newCount >= 2) {
+      setBackClickCount(0);
       navigate('/');
+      setShowFirebaseUsersModal(true);
+      setLoadingFirebaseUsers(true);
+      try {
+        if (db) {
+          const snap = await getDocs(collection(db, 'users'));
+          const users = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          setFirebaseUsersList(users);
+        }
+      } catch (err) {
+        console.error("Failed to fetch Firebase users:", err);
+      } finally {
+        setLoadingFirebaseUsers(false);
+      }
+      return;
     }
+
+    backTimeoutRef.current = setTimeout(() => {
+      setBackClickCount(0);
+      if (window.history.length > 1 && location.pathname !== '/') {
+        navigate(-1);
+      } else {
+        navigate('/');
+      }
+    }, 400);
   };
 
   const handleTitleClick = (e: MouseEvent) => {
@@ -79,7 +113,7 @@ export function AppLayout() {
                 <>
                   <Link to="/wallet" className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-neutral-900 border border-neutral-800 hover:bg-neutral-800 transition-colors">
                     <Wallet size={16} className="text-neutral-400" />
-                    <span className="text-sm font-medium">{profile?.credits ?? 0} INR</span>
+                    <span className="text-sm font-medium">{typeof profile?.credits === 'number' ? Number(profile.credits.toFixed(2)) : 0} INR</span>
                   </Link>
                   
                   <Link to="/wallet" className="p-2 text-neutral-400 hover:text-neutral-100 transition-colors rounded-full hover:bg-neutral-900">
@@ -128,6 +162,76 @@ export function AppLayout() {
         </div>
       </footer>
       <UsernameModal />
+
+      {showFirebaseUsersModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="p-6 border-b border-neutral-800 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                  <Users size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-medium text-white">Firebase Registered Users</h2>
+                  <p className="text-xs text-neutral-400">All users registered in Firebase project (RisknReward-ansh)</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowFirebaseUsersModal(false)}
+                className="p-2 rounded-full hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              {loadingFirebaseUsers ? (
+                <div className="text-center py-12 text-neutral-400">Loading all users from Firebase...</div>
+              ) : firebaseUsersList.length > 0 ? (
+                <div className="divide-y divide-neutral-800 border border-neutral-800 rounded-xl overflow-hidden bg-neutral-950">
+                  {firebaseUsersList.map((u, idx) => (
+                    <div key={u.id || idx} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-neutral-900/50 transition-colors">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-white">{u.displayName || 'User'}</span>
+                          {u.isAdmin && (
+                            <span className="px-2 py-0.5 text-[10px] bg-red-500/20 text-red-400 rounded-full font-semibold flex items-center gap-1">
+                              <Shield size={10} /> Admin
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-neutral-400">{u.email || 'No email'}</div>
+                        <div className="text-[11px] text-neutral-600 font-mono">UID: {u.uid || u.id}</div>
+                      </div>
+                      <div className="flex items-center gap-4 self-end sm:self-auto">
+                        <div className="text-right">
+                          <div className="text-xs text-neutral-400">Credits</div>
+                          <div className="text-sm font-semibold text-green-400">₹{u.credits ?? 0}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs text-neutral-400">Created</div>
+                          <div className="text-xs text-neutral-400">{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A'}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-neutral-500">No users found in Firebase project.</div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-neutral-800 bg-neutral-950 flex justify-end">
+              <button
+                onClick={() => setShowFirebaseUsersModal(false)}
+                className="px-5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-medium text-sm transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

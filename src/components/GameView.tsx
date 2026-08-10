@@ -243,8 +243,9 @@ export function GameView() {
 
     if (forcedOutcome === 'win') {
       win = true;
-      multiplier = dbConfig ? dbConfig.multiplier : 1.27;
-      message = 'Won of + 27% of the bet amount!';
+      const baseMult = dbConfig ? dbConfig.multiplier : (limits?.multipliers?.[gameId || ''] ?? 1.8);
+      multiplier = baseMult;
+      message = `Won! Payout multiplier: ${multiplier.toFixed(2)}x`;
       outcomeValue = gameId === 'coin-flip' ? coinChoice : gameId === 'dice-roll' ? diceNumberChoice : null;
     } else if (forcedOutcome === 'lose') {
       win = false;
@@ -252,31 +253,36 @@ export function GameView() {
       message = 'Loss of bet amount';
       outcomeValue = gameId === 'coin-flip' ? (coinChoice === 'heads' ? 'tails' : 'heads') : null;
     } else {
-      // Normal logic with 60% winning rate as requested
-      let effectiveWinRate = 60;
+      // Normal logic reading from Firestore platform limits (with 30% default win rate as requested)
+      let effectiveWinRate = 30;
+      if (limits?.winRates?.[gameId || ''] !== undefined) {
+        effectiveWinRate = limits.winRates[gameId || ''];
+      } else if (dbConfig?.winRate !== undefined) {
+        effectiveWinRate = dbConfig.winRate;
+      }
       const winProbability = effectiveWinRate / 100;
 
       if (dbConfig) {
         win = random < winProbability;
         multiplier = win ? dbConfig.multiplier : 0;
-        message = win ? 'Won of + 27% of the bet amount!' : 'Loss of bet amount';
+        message = win ? `Won! Payout multiplier: ${dbConfig.multiplier}x` : 'Loss of bet amount';
       } else {
         if (gameId === 'coin-flip') {
           win = random < winProbability;
           const resultFace = win ? coinChoice : (coinChoice === 'heads' ? 'tails' : 'heads');
           outcomeValue = resultFace;
-          const mult = limits?.multipliers?.['coin-flip'] ?? 1.27;
+          const mult = limits?.multipliers?.['coin-flip'] ?? 1.8;
           multiplier = win ? mult : 0;
-          message = win ? `It landed on ${resultFace}. Won of + 27% of the bet amount!` : `It landed on ${resultFace}. Loss of bet amount`;
+          message = win ? `It landed on ${resultFace}. Won payout of ${mult}x!` : `It landed on ${resultFace}. Loss of bet amount`;
         } else if (gameId === 'dice-roll') {
           const actualWinRate = diceChoiceType === 'number' ? winProbability / 3 : winProbability;
           win = random < actualWinRate;
           let roll = 1;
-          const baseMult = limits?.multipliers?.['dice-roll'] ?? 1.27;
+          const baseMult = limits?.multipliers?.['dice-roll'] ?? 1.8;
           if (diceChoiceType === 'number') {
             roll = win ? diceNumberChoice : (diceNumberChoice === 1 ? 2 : 1);
             multiplier = win ? baseMult * 2.5 : 0;
-            message = win ? `You rolled a ${roll}. Exact match! Won of + 27% of the bet amount!` : `You rolled a ${roll}. Loss of bet amount`;
+            message = win ? `You rolled a ${roll}. Exact match! Won payout of ${(baseMult * 2.5).toFixed(2)}x!` : `You rolled a ${roll}. Loss of bet amount`;
           } else {
             const evens = [2, 4, 6];
             const odds = [1, 3, 5];
@@ -286,17 +292,17 @@ export function GameView() {
               roll = win ? odds[Math.floor(Math.random() * odds.length)] : evens[Math.floor(Math.random() * evens.length)];
             }
             multiplier = win ? baseMult : 0;
-            message = win ? `You rolled a ${roll}. Won of + 27% of the bet amount!` : `You rolled a ${roll}. Loss of bet amount`;
+            message = win ? `You rolled a ${roll}. Won payout of ${baseMult}x!` : `You rolled a ${roll}. Loss of bet amount`;
           }
           outcomeValue = roll;
         } else if (gameId === 'lucky-wheel') {
           win = random < winProbability;
-          const baseMult = limits?.multipliers?.['lucky-wheel'] ?? 1.27;
+          const baseMult = limits?.multipliers?.['lucky-wheel'] ?? 1.8;
           if (win) {
              const isJackpot = Math.random() < 0.2; 
              multiplier = isJackpot ? baseMult * 2.5 : baseMult;
              outcomeValue = isJackpot ? "JACKPOT" : "WIN";
-             message = 'Won of + 27% of the bet amount!';
+             message = isJackpot ? `JACKPOT! Won payout of ${(baseMult * 2.5).toFixed(2)}x!` : `Won payout of ${baseMult}x!`;
           } else {
              multiplier = 0;
              outcomeValue = "LOSE";
@@ -304,23 +310,24 @@ export function GameView() {
           }
         } else if (gameId === 'dart-board') { 
           win = random < winProbability;
-          const baseMult = limits?.multipliers?.['dart-board'] ?? 1.27;
+          const baseMult = limits?.multipliers?.['dart-board'] ?? 1.8;
           multiplier = win ? baseMult : 0;
           outcomeValue = win ? "BULLSEYE" : "MISS";
-          message = win ? 'Bullseye! Won of + 27% of the bet amount!' : 'Loss of bet amount';
+          message = win ? `Bullseye! Won payout of ${baseMult}x!` : 'Loss of bet amount';
         } else { // bowling
           win = random < winProbability;
           const pins = win ? (Math.random() < 0.2 ? 10 : 8) : 4;
-          const baseMult = limits?.multipliers?.['bowling'] ?? 1.27;
+          const baseMult = limits?.multipliers?.['bowling'] ?? 1.8;
           multiplier = win ? (pins === 10 ? baseMult * 1.5 : baseMult * 0.75) : 0;
           outcomeValue = pins === 10 ? "STRIKE" : `${pins} PINS`;
-          message = win ? `You knocked down ${pins} pins. Won of + 27% of the bet amount!` : `You knocked down ${pins} pins. Loss of bet amount`;
+          message = win ? `You knocked down ${pins} pins. Won payout of ${(pins === 10 ? baseMult * 1.5 : baseMult * 0.75).toFixed(2)}x!` : `You knocked down ${pins} pins. Loss of bet amount`;
         }
       }
     }
 
-    const winnings = Math.floor(wager * multiplier);
-    const profit = winnings - wager;
+    const rawWinnings = wager * multiplier;
+    const winnings = Number(rawWinnings.toFixed(2));
+    const profit = Number((winnings - wager).toFixed(2));
 
     try {
       // 1. Instantly update local Zustand store
@@ -330,13 +337,15 @@ export function GameView() {
       try {
         const { updateUser: storageUpdateUser } = await import('../lib/storage');
         const oldStats = profile.stats || { totalWins: 0, totalCreditsWon: 0 };
+        const currentBal = profile.credits || 0;
+        const newBal = Number((currentBal + profit).toFixed(2));
         storageUpdateUser(user!.uid, {
-          credits: (profile.credits || 0) + profit,
+          credits: newBal,
           hasBetAfterDeposit: true,
           hasPlacedBet: true,
           stats: {
             totalWins: win ? (oldStats.totalWins || 0) + 1 : (oldStats.totalWins || 0),
-            totalCreditsWon: win ? (oldStats.totalCreditsWon || 0) + winnings : (oldStats.totalCreditsWon || 0)
+            totalCreditsWon: win ? Number(((oldStats.totalCreditsWon || 0) + winnings).toFixed(2)) : (oldStats.totalCreditsWon || 0)
           }
         });
       } catch (err) {
@@ -494,7 +503,7 @@ export function GameView() {
                 </div>
                 <div className={`inline-block px-5 py-2 rounded-full bg-neutral-950 border ${result.win ? 'border-green-800/60' : 'border-red-800/60'}`}>
                   <span className={`font-bold text-lg ${result.win ? 'text-green-400' : 'text-red-500'}`}>
-                    {result.win ? `+${result.amount - wager} INR` : `-${wager} INR`}
+                    {result.win ? `+${result.amount} INR (Profit: +${Number((result.amount - wager).toFixed(2))} INR)` : `-${wager} INR`}
                   </span>
                 </div>
               </motion.div>
@@ -724,10 +733,11 @@ export function GameView() {
               <div className="w-16 h-16 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mx-auto mb-4 text-green-400 text-2xl font-bold animate-bounce">
                 🎉
               </div>
-              <h3 className="text-2xl font-bold text-green-400 mb-1">won this amount</h3>
+              <h3 className="text-2xl font-bold text-green-400 mb-1">Won Game!</h3>
               <p className="text-sm text-neutral-400 mb-4">Payout credited to wallet</p>
-              <div className="text-3xl font-extrabold text-green-400 bg-neutral-950 border border-green-900/60 py-3 rounded-xl shadow-inner">
-                +{winAmount - wager} INR
+              <div className="text-2xl font-extrabold text-green-400 bg-neutral-950 border border-green-900/60 py-3 rounded-xl shadow-inner flex flex-col items-center justify-center">
+                <span>+{winAmount} INR</span>
+                <span className="text-xs text-green-500 font-medium font-mono mt-0.5">(Profit: +{Number((winAmount - wager).toFixed(2))} INR)</span>
               </div>
             </div>
           </motion.div>
