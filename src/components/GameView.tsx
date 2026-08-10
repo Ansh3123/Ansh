@@ -21,7 +21,7 @@ export function GameView() {
     createdAt: Date.now(),
     stats: { totalWins: 0, totalCreditsWon: 0 }
   } : null);
-  const [wager, setWager] = useState(1);
+  const [wager, setWager] = useState(3.5);
   const [playing, setPlaying] = useState(false);
   const [result, setResult] = useState<{ win: boolean, amount: number, message: string } | null>(null);
   const [showWinModal, setShowWinModal] = useState(false);
@@ -568,10 +568,11 @@ export function GameView() {
             <div className="relative">
               <input
                 type="number"
-                min="1"
+                min="0.5"
+                step="0.5"
                 max={profile.credits}
                 value={wager}
-                onChange={(e) => setWager(Math.min(profile.credits, Math.max(1, parseInt(e.target.value) || 0)))}
+                onChange={(e) => setWager(Math.min(profile.credits, Math.max(0.5, parseFloat(e.target.value) || 0)))}
                 className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-4 pr-12 py-3 text-neutral-100 focus:outline-none focus:border-neutral-600 transition-colors font-medium text-lg"
               />
               <span className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-500 font-medium">INR</span>
