@@ -212,6 +212,23 @@ export function GameView() {
     setShowWinModal(false);
     setShowLoseModal(false);
     
+    // Deduct wager immediately when playing starts
+    updateCredits(-wager);
+    try {
+      const { updateUser: storageUpdateUser } = await import('../lib/storage');
+      const currentBal = profile.credits || 0;
+      const newBal = Number((currentBal - wager).toFixed(2));
+      storageUpdateUser(user!.uid, { credits: newBal });
+    } catch (err) {
+      console.warn("Local storage wager deduction error:", err);
+    }
+    if (db) {
+      const userRef = doc(db, 'users', user!.uid);
+      setDoc(userRef, { credits: increment(-wager) }, { merge: true }).catch(err => {
+        console.warn("Firestore wager deduction error:", err);
+      });
+    }
+
     playSound('click');
 
     // Countdown 3..2..1
@@ -325,20 +342,22 @@ export function GameView() {
       }
     }
 
-    const rawWinnings = wager * multiplier;
+    const rawWinnings = win ? wager * multiplier : 0;
     const winnings = Number(rawWinnings.toFixed(2));
-    const profit = Number((winnings - wager).toFixed(2));
+    const profit = Number((win ? winnings - wager : -wager).toFixed(2));
+    // Since wager was already deducted at start of play, credit winnings on win, or 0 on loss
+    const creditAmount = win ? winnings : 0;
 
     try {
       // 1. Instantly update local Zustand store
-      updateCredits(profit);
+      updateCredits(creditAmount);
 
       // 2. Instantly update local storage state (so balance is saved offline and immediately ready)
       try {
         const { updateUser: storageUpdateUser } = await import('../lib/storage');
         const oldStats = profile.stats || { totalWins: 0, totalCreditsWon: 0 };
-        const currentBal = profile.credits || 0;
-        const newBal = Number((currentBal + profit).toFixed(2));
+        const currentBal = profile.credits || 0; // Note: profile.credits already had wager deducted at start
+        const newBal = Number((currentBal + creditAmount).toFixed(2));
         storageUpdateUser(user!.uid, {
           credits: newBal,
           hasBetAfterDeposit: true,
@@ -376,7 +395,7 @@ export function GameView() {
       if (db) {
         const userRef = doc(db, 'users', user!.uid);
         setDoc(userRef, { 
-          credits: increment(profit),
+          credits: increment(creditAmount),
           hasBetAfterDeposit: true,
           hasPlacedBet: true,
           'stats.totalWins': win ? increment(1) : increment(0),
