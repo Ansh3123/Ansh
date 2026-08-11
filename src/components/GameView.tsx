@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { doc, getDoc, setDoc, updateDoc, collection, addDoc, serverTimestamp, increment, onSnapshot, query, orderBy, limit, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
@@ -12,6 +12,7 @@ export function GameView() {
   const { gameId } = useParams();
   const navigate = useNavigate();
   const { user, profile: storeProfile, updateCredits } = useAuthStore();
+  const isPlayingRef = useRef(false);
   const profile: any = storeProfile || (user ? {
     uid: user.uid,
     email: user.email || '',
@@ -195,7 +196,7 @@ export function GameView() {
   const [countdown, setCountdown] = useState<number | null>(null);
 
   const handlePlay = async () => {
-    if (wager <= 0 || playing) return;
+    if (wager <= 0 || playing || isPlayingRef.current) return;
     if (wager > profile.credits) {
       setShowRechargeModal(true);
       if (rechargeTimer) clearTimeout(rechargeTimer);
@@ -206,6 +207,7 @@ export function GameView() {
       return;
     }
     
+    isPlayingRef.current = true;
     setPlaying(true);
     setResult(null);
     setLastOutcome(null);
@@ -399,6 +401,7 @@ export function GameView() {
       console.error("Error updating game result:", error);
     } finally {
       setPlaying(false);
+      isPlayingRef.current = false;
     }
   };
 
