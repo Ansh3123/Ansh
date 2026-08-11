@@ -211,23 +211,6 @@ export function GameView() {
     setLastOutcome(null);
     setShowWinModal(false);
     setShowLoseModal(false);
-    
-    // Deduct wager immediately when playing starts
-    updateCredits(-wager);
-    try {
-      const { updateUser: storageUpdateUser } = await import('../lib/storage');
-      const currentBal = profile.credits || 0;
-      const newBal = Number((currentBal - wager).toFixed(2));
-      storageUpdateUser(user!.uid, { credits: newBal });
-    } catch (err) {
-      console.warn("Local storage wager deduction error:", err);
-    }
-    if (db) {
-      const userRef = doc(db, 'users', user!.uid);
-      setDoc(userRef, { credits: increment(-wager) }, { merge: true }).catch(err => {
-        console.warn("Firestore wager deduction error:", err);
-      });
-    }
 
     playSound('click');
 
@@ -260,8 +243,7 @@ export function GameView() {
 
     if (forcedOutcome === 'win') {
       win = true;
-      const baseMult = dbConfig ? dbConfig.multiplier : (limits?.multipliers?.[gameId || ''] ?? 1.8);
-      multiplier = baseMult;
+      multiplier = 1.8;
       message = `Won! Payout multiplier: ${multiplier.toFixed(2)}x`;
       outcomeValue = gameId === 'coin-flip' ? coinChoice : gameId === 'dice-roll' ? diceNumberChoice : null;
     } else if (forcedOutcome === 'lose') {
@@ -270,94 +252,72 @@ export function GameView() {
       message = 'Loss of bet amount';
       outcomeValue = gameId === 'coin-flip' ? (coinChoice === 'heads' ? 'tails' : 'heads') : null;
     } else {
-      // Normal logic reading from Firestore platform limits (with 30% default win rate as requested)
-      let effectiveWinRate = 30;
-      if (limits?.winRates?.[gameId || ''] !== undefined) {
-        effectiveWinRate = limits.winRates[gameId || ''];
-      } else if (dbConfig?.winRate !== undefined) {
-        effectiveWinRate = dbConfig.winRate;
-      }
-      const winProbability = effectiveWinRate / 100;
-
-      if (dbConfig) {
-        win = random < winProbability;
-        multiplier = win ? dbConfig.multiplier : 0;
-        message = win ? `Won! Payout multiplier: ${dbConfig.multiplier}x` : 'Loss of bet amount';
-      } else {
-        if (gameId === 'coin-flip') {
-          win = random < winProbability;
-          const resultFace = win ? coinChoice : (coinChoice === 'heads' ? 'tails' : 'heads');
-          outcomeValue = resultFace;
-          const mult = limits?.multipliers?.['coin-flip'] ?? 1.8;
-          multiplier = win ? mult : 0;
-          message = win ? `It landed on ${resultFace}. Won payout of ${mult}x!` : `It landed on ${resultFace}. Loss of bet amount`;
-        } else if (gameId === 'dice-roll') {
-          const actualWinRate = diceChoiceType === 'number' ? winProbability / 3 : winProbability;
-          win = random < actualWinRate;
-          let roll = 1;
-          const baseMult = limits?.multipliers?.['dice-roll'] ?? 1.8;
-          if (diceChoiceType === 'number') {
-            roll = win ? diceNumberChoice : (diceNumberChoice === 1 ? 2 : 1);
-            multiplier = win ? baseMult * 2.5 : 0;
-            message = win ? `You rolled a ${roll}. Exact match! Won payout of ${(baseMult * 2.5).toFixed(2)}x!` : `You rolled a ${roll}. Loss of bet amount`;
-          } else {
-            const evens = [2, 4, 6];
-            const odds = [1, 3, 5];
-            if (diceChoiceType === 'even') {
-              roll = win ? evens[Math.floor(Math.random() * evens.length)] : odds[Math.floor(Math.random() * odds.length)];
-            } else { // odd
-              roll = win ? odds[Math.floor(Math.random() * odds.length)] : evens[Math.floor(Math.random() * evens.length)];
-            }
-            multiplier = win ? baseMult : 0;
-            message = win ? `You rolled a ${roll}. Won payout of ${baseMult}x!` : `You rolled a ${roll}. Loss of bet amount`;
+      // Hardcoded 30% win rate and 1.8x multiplier as requested
+      const winProbability = 0.3;
+      win = random < winProbability;
+      
+      if (gameId === 'coin-flip') {
+        const resultFace = win ? coinChoice : (coinChoice === 'heads' ? 'tails' : 'heads');
+        outcomeValue = resultFace;
+        multiplier = win ? 1.8 : 0;
+        message = win ? `It landed on ${resultFace}. Won payout of 1.8x!` : `It landed on ${resultFace}. Loss of bet amount`;
+      } else if (gameId === 'dice-roll') {
+        const actualWinRate = diceChoiceType === 'number' ? 0.3 / 3 : 0.3; // Make harder if number choice
+        win = random < actualWinRate;
+        let roll = 1;
+        if (diceChoiceType === 'number') {
+          roll = win ? diceNumberChoice : (diceNumberChoice === 1 ? 2 : 1);
+          multiplier = win ? 1.8 * 2.5 : 0; // Special multiplier for exact match
+          message = win ? `You rolled a ${roll}. Exact match! Won payout of ${(1.8 * 2.5).toFixed(2)}x!` : `You rolled a ${roll}. Loss of bet amount`;
+        } else {
+          const evens = [2, 4, 6];
+          const odds = [1, 3, 5];
+          if (diceChoiceType === 'even') {
+            roll = win ? evens[Math.floor(Math.random() * evens.length)] : odds[Math.floor(Math.random() * odds.length)];
+          } else { // odd
+            roll = win ? odds[Math.floor(Math.random() * odds.length)] : evens[Math.floor(Math.random() * evens.length)];
           }
-          outcomeValue = roll;
-        } else if (gameId === 'lucky-wheel') {
-          win = random < winProbability;
-          const baseMult = limits?.multipliers?.['lucky-wheel'] ?? 1.8;
-          if (win) {
-             const isJackpot = Math.random() < 0.2; 
-             multiplier = isJackpot ? baseMult * 2.5 : baseMult;
-             outcomeValue = isJackpot ? "JACKPOT" : "WIN";
-             message = isJackpot ? `JACKPOT! Won payout of ${(baseMult * 2.5).toFixed(2)}x!` : `Won payout of ${baseMult}x!`;
-          } else {
-             multiplier = 0;
-             outcomeValue = "LOSE";
-             message = 'Loss of bet amount';
-          }
-        } else if (gameId === 'dart-board') { 
-          win = random < winProbability;
-          const baseMult = limits?.multipliers?.['dart-board'] ?? 1.8;
-          multiplier = win ? baseMult : 0;
-          outcomeValue = win ? "BULLSEYE" : "MISS";
-          message = win ? `Bullseye! Won payout of ${baseMult}x!` : 'Loss of bet amount';
-        } else { // bowling
-          win = random < winProbability;
-          const pins = win ? (Math.random() < 0.2 ? 10 : 8) : 4;
-          const baseMult = limits?.multipliers?.['bowling'] ?? 1.8;
-          multiplier = win ? (pins === 10 ? baseMult * 1.5 : baseMult * 0.75) : 0;
-          outcomeValue = pins === 10 ? "STRIKE" : `${pins} PINS`;
-          message = win ? `You knocked down ${pins} pins. Won payout of ${(pins === 10 ? baseMult * 1.5 : baseMult * 0.75).toFixed(2)}x!` : `You knocked down ${pins} pins. Loss of bet amount`;
+          multiplier = win ? 1.8 : 0;
+          message = win ? `You rolled a ${roll}. Won payout of 1.8x!` : `You rolled a ${roll}. Loss of bet amount`;
         }
+        outcomeValue = roll;
+      } else if (gameId === 'lucky-wheel') {
+        if (win) {
+           const isJackpot = Math.random() < 0.2; 
+           multiplier = isJackpot ? 1.8 * 2.5 : 1.8;
+           outcomeValue = isJackpot ? "JACKPOT" : "WIN";
+           message = isJackpot ? `JACKPOT! Won payout of ${(1.8 * 2.5).toFixed(2)}x!` : `Won payout of 1.8x!`;
+        } else {
+           multiplier = 0;
+           outcomeValue = "LOSE";
+           message = 'Loss of bet amount';
+        }
+      } else if (gameId === 'dart-board') { 
+        multiplier = win ? 1.8 : 0;
+        outcomeValue = win ? "BULLSEYE" : "MISS";
+        message = win ? `Bullseye! Won payout of 1.8x!` : 'Loss of bet amount';
+      } else { // bowling
+        const pins = win ? (Math.random() < 0.2 ? 10 : 8) : 4;
+        multiplier = win ? (pins === 10 ? 1.8 * 1.5 : 1.8 * 0.75) : 0;
+        outcomeValue = pins === 10 ? "STRIKE" : `${pins} PINS`;
+        message = win ? `You knocked down ${pins} pins. Won payout of ${(pins === 10 ? 1.8 * 1.5 : 1.8 * 0.75).toFixed(2)}x!` : `You knocked down ${pins} pins. Loss of bet amount`;
       }
     }
 
     const rawWinnings = win ? wager * multiplier : 0;
     const winnings = Number(rawWinnings.toFixed(2));
     const profit = Number((win ? winnings - wager : -wager).toFixed(2));
-    // Since wager was already deducted at start of play, credit winnings on win, or 0 on loss
-    const creditAmount = win ? winnings : 0;
 
     try {
       // 1. Instantly update local Zustand store
-      updateCredits(creditAmount);
+      updateCredits(profit);
 
       // 2. Instantly update local storage state (so balance is saved offline and immediately ready)
       try {
         const { updateUser: storageUpdateUser } = await import('../lib/storage');
         const oldStats = profile.stats || { totalWins: 0, totalCreditsWon: 0 };
-        const currentBal = profile.credits || 0; // Note: profile.credits already had wager deducted at start
-        const newBal = Number((currentBal + creditAmount).toFixed(2));
+        const currentBal = profile.credits || 0;
+        const newBal = Number((currentBal + profit).toFixed(2));
         storageUpdateUser(user!.uid, {
           credits: newBal,
           hasBetAfterDeposit: true,
@@ -395,7 +355,7 @@ export function GameView() {
       if (db) {
         const userRef = doc(db, 'users', user!.uid);
         setDoc(userRef, { 
-          credits: increment(creditAmount),
+          credits: increment(profit),
           hasBetAfterDeposit: true,
           hasPlacedBet: true,
           'stats.totalWins': win ? increment(1) : increment(0),
