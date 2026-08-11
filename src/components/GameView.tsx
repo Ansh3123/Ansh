@@ -267,8 +267,8 @@ export function GameView() {
         let roll = 1;
         if (diceChoiceType === 'number') {
           roll = win ? diceNumberChoice : (diceNumberChoice === 1 ? 2 : 1);
-          multiplier = win ? 1.8 * 2.5 : 0; // Special multiplier for exact match
-          message = win ? `You rolled a ${roll}. Exact match! Won payout of ${(1.8 * 2.5).toFixed(2)}x!` : `You rolled a ${roll}. Loss of bet amount`;
+          multiplier = win ? 1.8 : 0;
+          message = win ? `You rolled a ${roll}. Exact match! Won payout of 1.8x!` : `You rolled a ${roll}. Loss of bet amount`;
         } else {
           const evens = [2, 4, 6];
           const odds = [1, 3, 5];
@@ -284,9 +284,9 @@ export function GameView() {
       } else if (gameId === 'lucky-wheel') {
         if (win) {
            const isJackpot = Math.random() < 0.2; 
-           multiplier = isJackpot ? 1.8 * 2.5 : 1.8;
+           multiplier = 1.8;
            outcomeValue = isJackpot ? "JACKPOT" : "WIN";
-           message = isJackpot ? `JACKPOT! Won payout of ${(1.8 * 2.5).toFixed(2)}x!` : `Won payout of 1.8x!`;
+           message = isJackpot ? `JACKPOT! Won payout of 1.8x!` : `Won payout of 1.8x!`;
         } else {
            multiplier = 0;
            outcomeValue = "LOSE";
@@ -298,9 +298,9 @@ export function GameView() {
         message = win ? `Bullseye! Won payout of 1.8x!` : 'Loss of bet amount';
       } else { // bowling
         const pins = win ? (Math.random() < 0.2 ? 10 : 8) : 4;
-        multiplier = win ? (pins === 10 ? 1.8 * 1.5 : 1.8 * 0.75) : 0;
+        multiplier = win ? 1.8 : 0;
         outcomeValue = pins === 10 ? "STRIKE" : `${pins} PINS`;
-        message = win ? `You knocked down ${pins} pins. Won payout of ${(pins === 10 ? 1.8 * 1.5 : 1.8 * 0.75).toFixed(2)}x!` : `You knocked down ${pins} pins. Loss of bet amount`;
+        message = win ? `You knocked down ${pins} pins. Won payout of 1.8x!` : `You knocked down ${pins} pins. Loss of bet amount`;
       }
     }
 
@@ -354,13 +354,16 @@ export function GameView() {
       // 4. Asynchronously update Firestore database in the background
       if (db) {
         const userRef = doc(db, 'users', user!.uid);
-        setDoc(userRef, { 
+        
+        const updateData: any = {
           credits: increment(profit),
           hasBetAfterDeposit: true,
           hasPlacedBet: true,
           'stats.totalWins': win ? increment(1) : increment(0),
           'stats.totalCreditsWon': win ? increment(winnings) : increment(0)
-        }, { merge: true }).catch(err => {
+        };
+
+        setDoc(userRef, updateData, { merge: true }).catch(err => {
           console.warn("Firestore user sync error:", err);
         });
 
