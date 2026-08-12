@@ -254,8 +254,8 @@ export function GameView() {
       message = 'Loss of bet amount';
       outcomeValue = gameId === 'coin-flip' ? (coinChoice === 'heads' ? 'tails' : 'heads') : null;
     } else {
-      // Hardcoded 30% win rate and 1.8x multiplier as requested
-      const winProbability = 0.3;
+      // Hardcoded 37% win rate and 1.8x multiplier as requested
+      const winProbability = 0.37;
       win = random < winProbability;
       
       if (gameId === 'coin-flip') {
@@ -264,7 +264,7 @@ export function GameView() {
         multiplier = win ? 1.8 : 0;
         message = win ? `It landed on ${resultFace}. Won payout of 1.8x!` : `It landed on ${resultFace}. Loss of bet amount`;
       } else if (gameId === 'dice-roll') {
-        const actualWinRate = diceChoiceType === 'number' ? 0.3 / 3 : 0.3; // Make harder if number choice
+        const actualWinRate = diceChoiceType === 'number' ? 0.37 / 3 : 0.37; // Make harder if number choice
         win = random < actualWinRate;
         let roll = 1;
         if (diceChoiceType === 'number') {

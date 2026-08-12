@@ -94,6 +94,8 @@ export function AdminDashboard() {
       { email: 'anshgupta4525@gmail.com', displayName: 'Ansh Gupta' },
       { email: 'guptakundan1984@gmail.com', displayName: 'Kundan Gupta' },
       { email: 'gouravvvvvvvvsuper@gmail.com', displayName: 'Gourav Super' },
+      { email: 'shaikjunaidused@gmail.com', displayName: 'Shaik Junaid' },
+      { email: 'hnagpal350@gmail.com', displayName: 'H Nagpal' },
     ];
 
     requiredUsers.forEach(req => {
