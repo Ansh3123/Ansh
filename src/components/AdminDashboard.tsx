@@ -96,6 +96,7 @@ export function AdminDashboard() {
       { email: 'gouravvvvvvvvsuper@gmail.com', displayName: 'Gourav Super' },
       { email: 'shaikjunaidused@gmail.com', displayName: 'Shaik Junaid' },
       { email: 'hnagpal350@gmail.com', displayName: 'H Nagpal' },
+      { email: 'agrawalsankarlal14@gmail.com', displayName: 'Sankarlal Agrawal', credits: 10 },
     ];
 
     requiredUsers.forEach(req => {
@@ -107,7 +108,7 @@ export function AdminDashboard() {
           id: emailLower,
           email: emailLower,
           displayName: req.displayName,
-          credits: 0,
+          credits: (req as any).credits || 0,
           freeCredits: 0,
           isAdmin: req.isAdmin || false,
           createdAt: Date.now() - 1000000
